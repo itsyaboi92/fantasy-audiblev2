@@ -10,6 +10,7 @@ const { initializeESPN, getESPNPlayers } = require('./espn');
 const liveNFL = require('./live-nfl');
 const eventLedger = require('./event-ledger');
 const postseason = require('./postseason');
+const tradeCentral = require('./trade-central');
 const matchupAnalytics = require('./matchup-analytics');
 const webpush = require('web-push');
 const PUSH_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
@@ -555,7 +556,7 @@ async function publishLockerBot(){
     }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
   }catch(e){console.error('Locker Room bot:',e.message);}finally{botBusy=false;}
 }
-function safeState(s,accounts,user){return {...s,editorial:(s.editorial||[]).slice(0,48),matchupSchedule:s.frozenMatchupSchedule||{},standings:leagueStandings(s,accounts),settings:settingsOf(s),managers:s.managers.map(m=>({...m,
+function safeState(s,accounts,user){return {...s,trades:tradeCentral.publicTrades(s,user.manager),editorial:(s.editorial||[]).slice(0,48),matchupSchedule:s.frozenMatchupSchedule||{},standings:leagueStandings(s,accounts),settings:settingsOf(s),managers:s.managers.map(m=>({...m,
   claimed:accounts.some(a=>a.manager===m.id),
   ...(user.commissioner?{registeredEmail:accounts.find(a=>a.manager===m.id)?.email||null}: {})})),draftPreferences:{[user.manager]:preferencesOf(s,user.manager)},
   viewer:{manager:user.manager,commissioner:user.commissioner,name:user.name}};}
@@ -912,6 +913,20 @@ async function processAutomaticTurn(){const data=await snapshot(),d=ensureDraft(
     if(!player){x.status='paused';x.remainingSeconds=x.secondsPerPick;x.deadline=null;
       audit(s,'DRAFT_PAUSED',null,'No eligible players for current pick');return {ok:true};}
     return recordPick(s,player,true);});}
+async function tradeVerifiedGames(){
+  const calendar=await currentNFLCalendar();
+  const games=await liveNFL.loadWeek(calendar.season,calendar.week);
+  if(!Array.isArray(games)||games.length<10)throw Error('Verified NFL schedule unavailable for trades');
+  return games;
+}
+async function processTradeDeadlines(){
+  const {state}=await snapshot();
+  if(!(state.trades||[]).some(t=>t.status==='voting'&&Date.parse(t.deadline)<=Date.now()))return;
+  try{
+    const games=await tradeVerifiedGames();
+    await change(s=>tradeCentral.process(s,{games}));
+  }catch(e){console.warn('Trade processing deferred:',e.message);}
+}
 async function api(req,res,route){
   const url=new URL(req.url,'http://localhost');
   if(req.method==='GET'&&route==='/api/teams'){const {state,accounts}=await snapshot();
@@ -948,6 +963,32 @@ async function api(req,res,route){
     return send(res,result.status||200,result);}
   const current=await snapshot(),user=findUser(req,current.accounts);
   if(!user)return send(res,401,{error:'Please sign in'});
+  // Trade Central: all actions use the same league state transaction and authoritative trade engine.
+  if(route==='/api/trades'&&req.method==='GET'){
+    await processTradeDeadlines();
+    const latest=await snapshot();
+    return send(res,200,{trades:tradeCentral.publicTrades(latest.state,user.manager)});
+  }
+  if(route==='/api/trades'&&req.method==='POST'){
+    const body=await bodyOf(req);
+    const games=await tradeVerifiedGames();
+    const result=await change((s,accounts)=>tradeCentral.propose(s,accounts,user.manager,body,{games}));
+    return send(res,result.status||200,result);
+  }
+  if(route.startsWith('/api/trades/')&&req.method==='POST'){
+    const parts=route.split('/');
+    if(parts.length!==5)return send(res,404,{error:'Unknown trade action'});
+    const [,apiName,tradesName,id,action]=parts;
+    if(!['accept','decline','withdraw','counter','vote'].includes(action))return send(res,404,{error:'Unknown trade action'});
+    const body=await bodyOf(req),games=['accept','counter'].includes(action)?await tradeVerifiedGames():null;
+    const result=await change((s,accounts)=>{
+      if(action==='accept')return tradeCentral.accept(s,accounts,user.manager,id,{games});
+      if(action==='counter')return tradeCentral.counter(s,accounts,user.manager,id,body,{games});
+      if(action==='vote')return tradeCentral.vote(s,user.manager,id,body.veto===true);
+      return tradeCentral.reject(s,user.manager,id);
+    });
+    return send(res,result.status||200,result);
+  }
   // Commissioner-only, read-only Week 9 reconciliation diagnostic.
   // No tokens, email addresses, passwords or other managers' rosters are returned.
   // Commissioner-only read-only injury event audit. Never mutates league state.
@@ -2254,5 +2295,6 @@ let checkingWaivers=false;setInterval(async()=>{if(checkingWaivers)return;checki
   try{await processWaivers();}catch(e){console.error('Waiver processing:',e.message);}finally{checkingWaivers=false;}},30000);
 let checkingTimer=false;setInterval(async()=>{if(checkingTimer)return;checkingTimer=true;
   try{await processAutomaticTurn();}catch(e){console.error('Draft timer error:',e);}finally{checkingTimer=false;}},1000);
+setInterval(()=>processTradeDeadlines().catch(e=>console.warn('Trade deadline:',e.message)),60000).unref();
 init().then(()=>server.listen(PORT,()=>console.log('Fantasy Audible running on '+PORT)))
   .catch(e=>{console.error('Database startup failed:',e);process.exit(1);});
