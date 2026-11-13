@@ -35,3 +35,10 @@ Trade Central is located in the League tab. Managers can inspect starters and be
 ## Testing
 
 Run `node test-trade-central.js` and the existing regression tests. Staging deployment and live NFL feed integration remain unverified.
+
+### Trade Central scoring display repair
+- Roster records may have IDs such as `espn-123`; projection and weekly scoring feeds are keyed by the normalized ESPN ID (`123`). Trade Central now resolves the ESPN ID consistently.
+- Opening League requests NFL matchup/player metadata, and League rerenders when that request completes.
+- `Last` displays the current game's points only if final; otherwise it displays the most recent verified completed-game score from the historical analytics feed. Unavailable scores and projections remain em dashes, never fabricated zeros.
+- Starters, bench, and injured reserve are separated in the trade selection UI.
+- Regression: `node test-trade-central-scoring.js`.

@@ -11,6 +11,8 @@ const liveNFL = require('./live-nfl');
 const eventLedger = require('./event-ledger');
 const postseason = require('./postseason');
 const tradeCentral = require('./trade-central');
+const {createResourceScheduler}=require('./resource-scheduler');
+const resourceJobs=createResourceScheduler();
 const matchupAnalytics = require('./matchup-analytics');
 const webpush = require('web-push');
 const PUSH_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
@@ -1305,7 +1307,7 @@ async function api(req,res,route){
         const positions=new Map(directory.players.map(p=>[String(p.id),p.position]));
         historical=await matchupAnalytics.analytics(season,week,settingsOf(current.state).scoring,positions);
         for(const [id,entry] of Object.entries(players)){
-          const h=historical.players[id];if(h){entry.projectionSample=h.projectionSample;entry.historicalWeeklyScores=(historical.playerGames?.[id]||[]).map(g=>g.points).filter(Number.isFinite);}
+          const h=historical.players[id];if(h){entry.projectionSample=h.projectionSample;entry.historicalWeeklyScores=(historical.playerGames?.[id]||[]).map(g=>g.points).filter(Number.isFinite);const completed=(historical.playerGames?.[id]||[]).filter(g=>Number.isFinite(g.points)&&Number(g.week)<week).sort((a,b)=>b.week-a.week);if(completed.length){entry.lastCompletedPoints=completed[0].points;entry.lastCompletedWeek=completed[0].week;}}
         }
         const games=await liveNFL.loadWeek(season,week);
         const opponents={};for(const g of games)for(const side of g.teams){
@@ -2278,23 +2280,26 @@ setTimeout(publishLockerBot,35000);
 setTimeout(publishEditorial,25000);
 setInterval(remindPendingInjuries,60000);
 setInterval(pollLiveInjuries,30000);
-setInterval(faSyncRosterStatuses,5*60000);
-setTimeout(faSyncRosterStatuses,12000);
+setInterval(()=>resourceJobs.run('faSyncRosterStatuses',faSyncRosterStatuses),5*60000);
+setTimeout(()=>resourceJobs.run('faSyncRosterStatuses',faSyncRosterStatuses),12000);
 setTimeout(pollLiveInjuries,18000);
-setInterval(syncPlayerDirectory,15*60*1000);
-setTimeout(syncPlayerDirectory,12000);
+setInterval(()=>resourceJobs.run('syncPlayerDirectory',syncPlayerDirectory),15*60*1000);
+setTimeout(()=>resourceJobs.run('syncPlayerDirectory',syncPlayerDirectory),12000);
 setInterval(activateLeagueSchedule,60000);
 setTimeout(activateLeagueSchedule,3000);
-setInterval(syncNFLScoring,60000);
-setInterval(reconcileHistoricalMatchups,30*60*1000);
-setTimeout(reconcileHistoricalMatchups,90*1000);
+setInterval(()=>resourceJobs.run('syncNFLScoring',syncNFLScoring),60000);
+setInterval(()=>resourceJobs.run('reconcileHistoricalMatchups',reconcileHistoricalMatchups),30*60*1000);
+setTimeout(()=>resourceJobs.run('reconcileHistoricalMatchups',reconcileHistoricalMatchups),90*1000);
 setInterval(updatePostseason,60000);
 setTimeout(updatePostseason,20000);
-setTimeout(syncNFLScoring,6000);
+setTimeout(()=>resourceJobs.run('syncNFLScoring',syncNFLScoring),6000);
 let checkingWaivers=false;setInterval(async()=>{if(checkingWaivers)return;checkingWaivers=true;
   try{await processWaivers();}catch(e){console.error('Waiver processing:',e.message);}finally{checkingWaivers=false;}},30000);
 let checkingTimer=false;setInterval(async()=>{if(checkingTimer)return;checkingTimer=true;
   try{await processAutomaticTurn();}catch(e){console.error('Draft timer error:',e);}finally{checkingTimer=false;}},1000);
 setInterval(()=>processTradeDeadlines().catch(e=>console.warn('Trade deadline:',e.message)),60000).unref();
+// Lightweight, periodic process-level telemetry; does not retain heap snapshots.
+const memoryReport=setInterval(()=>console.info('[memory-health]',JSON.stringify(resourceJobs.status())),60000);
+memoryReport.unref();
 init().then(()=>server.listen(PORT,()=>console.log('Fantasy Audible running on '+PORT)))
   .catch(e=>{console.error('Database startup failed:',e);process.exit(1);});
