@@ -190,20 +190,20 @@ async function loadWeeklyDirectory(force=false){
     weeklyUpdatedAt=data.updatedAt||null;
     weeklyLastFetch=Date.now();
   }catch(e){weeklyLastFetch=Date.now();console.warn('Weekly player directory:',e.message);}
-  finally{weeklyLoading=false;if(tab==='Players'||tab==='My Team'||tab==='Matchup')render();}
+  finally{weeklyLoading=false;if(tab==='Players'||tab==='My Team'||tab==='Matchup'||tab==='League')render();}
 }
 function playerNextProjection(x){
   const season=Number(state?.nflDirectorySync?.season||new Date().getFullYear());
   const week=Math.min(18,Math.max(1,Number(state?.nflDirectorySync?.currentWeek||state?.week||selectedMatchupWeek())));
   const key=season+':'+week;
-  const metadata=nflPlayerMetaCache[key]?.data?.players?.[String(x.id)];
+  const metadata=nflPlayerMetaCache[key]?.data?.players?.[String(x.espnId||String(x.id).replace(/^espn-/,''))];
   const game=nflMatchupCache[key]?.data?.teams?.[String(metadata?.teamId||x.nflTeamId||'')];
   if(!game||game.status==='final')return null;
   const value=metadata?.weeklyProjectedPoints;
   return value==null||!Number.isFinite(Number(value))?null:Number(value);
 }
 function weeklyCell(x){
-  const entry=weeklyDirectory[String(x.id)];
+  const entry=weeklyDirectory[String(x.espnId||String(x.id).replace(/^espn-/,''))];
   if(!entry)return {last:null,live:null};
   if(entry.gameStatus==='final')return {last:entry.points,live:null};
   if(entry.gameStatus==='playing')return {last:null,live:entry.points};
@@ -853,7 +853,7 @@ async function fetchNFLMatchups(week){
       }
     }catch(e){console.warn('NFL player metadata:',e.message);}
   }catch(e){console.warn('NFL matchup metadata:',e.message);nflMatchupCache[key]={at:Date.now(),data:{teams:{}}};}
-  finally{nflMatchupPending.delete(key);if((tab==='Matchup'||tab==='Players'||tab==='My Team'||tab==='Home')&&(tab==='My Team'||tab==='Home'||selectedMatchupWeek()===week))render();}
+  finally{nflMatchupPending.delete(key);if((tab==='Matchup'||tab==='Players'||tab==='My Team'||tab==='Home'||tab==='League')&&(tab==='My Team'||tab==='Home'||tab==='League'||selectedMatchupWeek()===week))render();}
 }
 function nflPlayerGame(x){
   const week=selectedMatchupWeek(),season=Number(state?.nflDirectorySync?.season||new Date().getFullYear());
@@ -1510,12 +1510,21 @@ async function tradeSubmit(){
     tradeGiving=[];tradeReceiving=[];await loadTrades();toast('Trade offer sent');}
   catch(e){toast(e.message);}
 }
+function tradeLastScore(x){
+  const id=String(x.espnId||String(x.id).replace(/^espn-/,''));
+  const weekly=weeklyDirectory[id];
+  const currentWeek=Number(state?.nflDirectorySync?.currentWeek||state?.week||1);
+  if(weekly?.gameStatus==='final'&&Number(weekly.week)===currentWeek&&Number.isFinite(Number(weekly.points)))return Number(weekly.points);
+  const season=Number(state?.nflDirectorySync?.season||new Date().getFullYear());
+  const meta=nflPlayerMetaCache[season+':'+currentWeek]?.data?.players?.[id];
+  return meta?.lastCompletedPoints!=null&&Number.isFinite(Number(meta.lastCompletedPoints))?Number(meta.lastCompletedPoints):null;
+}
 function tradePlayerRow(x,side){
   const checked=(side==='give'?tradeGiving:tradeReceiving).includes(String(x.id));
   const projection=playerNextProjection(x);
-  const weekly=weeklyCell(x);
+  const last=tradeLastScore(x);
   return `<div class="row"><label style="display:flex;align-items:center;gap:8px;flex:1"><input type="checkbox" ${checked?'checked':''} onchange='tradeToggle(${jsAttr(side)},${jsAttr(String(x.id))})'>
-    <span><b>${esc(x.name)}</b><br><small>${esc(x.pos)} · ${esc(x.slot)} · Proj ${projection==null?'—':fmt(projection)} · Last ${weekly.last==null?'—':fmt(weekly.last)}</small></span></label>
+    <span><b>${esc(x.name)}</b><br><small>${esc(x.pos)} · ${esc(x.slot)} · Proj ${projection==null?'—':fmt(projection)} · Last ${last==null?'—':fmt(last)}</small></span></label>
     <button type="button" onclick='openPlayerProfile(${jsAttr(String(x.espnId||x.id))})'>History</button></div>`;
 }
 function tradeAnalysis(){
@@ -1545,7 +1554,10 @@ function tradeCentralUI(){
   const teams=(state.managers||[]).filter(x=>x.claimed&&x.id!==manager);
   if(!tradePartner||!teams.some(t=>t.id===tradePartner))tradePartner=teams[0]?.id||'';
   const mine=state.players.filter(x=>x.owner===manager),other=state.players.filter(x=>x.owner===tradePartner);
-  const lineup=(xs)=>xs.filter(x=>!['BENCH','IR'].includes(x.slot)).concat(xs.filter(x=>x.slot==='BENCH'),xs.filter(x=>x.slot==='IR'));
+  const starters=xs=>xs.filter(x=>!['BENCH','IR'].includes(x.slot));
+  const bench=xs=>xs.filter(x=>x.slot==='BENCH');
+  const ir=xs=>xs.filter(x=>x.slot==='IR');
+  const rosterRows=(xs,side)=>`<h4>Starters (${starters(xs).length})</h4>${starters(xs).map(x=>tradePlayerRow(x,side)).join('')||'<p class="muted small">None</p>'}<h4>Bench (${bench(xs).length})</h4>${bench(xs).map(x=>tradePlayerRow(x,side)).join('')||'<p class="muted small">None</p>'}${ir(xs).length?`<h4>IR (${ir(xs).length})</h4>${ir(xs).map(x=>tradePlayerRow(x,side)).join('')}`:''}`;
   const selector=`<select onchange="tradeSelectTeam(this.value)">${teams.map(x=>`<option value="${esc(x.id)}" ${x.id===tradePartner?'selected':''}>${esc(x.team)}</option>`).join('')}</select>`;
   const offers=tradeData.map(t=>{
     const name=id=>esc(m(id)?.team||id);
@@ -1563,8 +1575,8 @@ function tradeCentralUI(){
   }).join('');
   return card('Trade Central',`<p class="muted small">Select starters or bench players. Projected points are weekly estimates; player history opens the existing detailed profile. Trade evaluation is advisory, not a guaranteed valuation.</p>
     ${tradeError?`<p>${esc(tradeError)}</p>`:''}
-    <h3>Your roster · ${esc(m(manager)?.team||'')}</h3>${lineup(mine).map(x=>tradePlayerRow(x,'give')).join('')||'<p>No roster players</p>'}
-    <h3>Trade partner ${selector}</h3>${lineup(other).map(x=>tradePlayerRow(x,'receive')).join('')||'<p>No roster players</p>'}
+    <h3>Your roster · ${esc(m(manager)?.team||'')}</h3>${rosterRows(mine,'give')}
+    <h3>Trade partner ${selector}</h3>${rosterRows(other,'receive')}
     <p><b>Selected:</b> ${tradeGiving.length} outgoing · ${tradeReceiving.length} incoming</p>${tradeAnalysis()}
     <button onclick="tradeSubmit()" ${!tradePartner?'disabled':''}>Propose Trade</button>
     <h3>Offers and league voting</h3><p class="muted small">Accepted offers enter a 24-hour vote. A majority of eligible non-trading teams must veto. Eligible teams are frozen at acceptance.</p>
@@ -1583,7 +1595,7 @@ function changeTab(next){closeMatchupGameStats();if(next==='Matchup'&&tab!=='Mat
   if(tab==='Players'){loadWeeklyDirectory();fetchNFLMatchups(Math.min(18,Math.max(1,Number(state?.nflDirectorySync?.currentWeek||state?.week||selectedMatchupWeek()))));}
   if(tab==='Matchup'){loadWeeklyDirectory();fetchNFLMatchups(selectedMatchupWeek());}
   if(tab==='Players'||tab==='My Waivers')loadTransactions();
-  if(tab==='Locker Room')loadChat();if(tab==='League'){loadTrades();loadWeeklyDirectory();}}
+  if(tab==='Locker Room')loadChat();if(tab==='League'){loadTrades();loadWeeklyDirectory();fetchNFLMatchups(Math.min(18,Math.max(1,Number(state?.nflDirectorySync?.currentWeek||state?.week||1))));}}
 function logout(){localStorage.removeItem('audibleToken');location.reload();}
 function authForm(){$('tabs').innerHTML='';$('connection').textContent='● Sign in';
   $('app').innerHTML=`<section class="card" style="max-width:500px;margin:auto"><h1>Fantasy Audible</h1>
