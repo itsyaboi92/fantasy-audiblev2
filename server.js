@@ -12,6 +12,7 @@ const eventLedger = require('./event-ledger');
 const postseason = require('./postseason');
 const tradeCentral = require('./trade-central');
 const {createResourceScheduler}=require('./resource-scheduler');
+const {mapBounded}=require('./bounded-work');
 const resourceJobs=createResourceScheduler();
 const matchupAnalytics = require('./matchup-analytics');
 const webpush = require('web-push');
@@ -94,6 +95,8 @@ function faWeeklyRecord(raw,week){
 }
 async function faWeeklyESPN(season,week){
   const key=season+':'+week,old=faWeeklyFeedCache.get(key);
+  // Keep at most two scoring periods; discard expired periods before fetching.
+  for(const [k,v] of faWeeklyFeedCache)if(k!==key&&Date.now()-v.at>5*60000)faWeeklyFeedCache.delete(k);
   if(old&&Date.now()-old.at<5*60000)return old;
   if(faWeeklyFeedPending.has(key))return faWeeklyFeedPending.get(key);
   const job=(async()=>{
@@ -104,7 +107,9 @@ async function faWeeklyESPN(season,week){
     const raw=await res.json(),entries=Array.isArray(raw)?raw:raw.players||[];
     const players={};for(const item of entries){const entry=faWeeklyRecord(item,week);if(entry.id!=='undefined')players[entry.id]=entry;}
     if(!Object.keys(players).length)throw Error('Empty ESPN weekly feed');
-    const result={at:Date.now(),players};faWeeklyFeedCache.set(key,result);return result;
+    const result={at:Date.now(),players};faWeeklyFeedCache.set(key,result);
+    while(faWeeklyFeedCache.size>2)faWeeklyFeedCache.delete(faWeeklyFeedCache.keys().next().value);
+    return result;
   })().finally(()=>faWeeklyFeedPending.delete(key));
   faWeeklyFeedPending.set(key,job);
   try{return await job;}catch(e){if(old){console.warn('ESPN weekly feed stale:',e.message);return {...old,stale:true};}throw e;}
@@ -1417,17 +1422,17 @@ async function api(req,res,route){
       const key=`${season}:${currentWeek}:${team}:${id}:${JSON.stringify(settingsOf(current.state).scoring)}`;
       const cached=playerHistoryCache.get(key);
       if(cached&&Date.now()-cached.at<15*60*1000)return send(res,200,cached.value);
-      const boards=await Promise.all(Array.from({length:currentWeek},(_,i)=>i+1).map(async week=>{
+      const boards=await mapBounded(Array.from({length:currentWeek},(_,i)=>i+1),2,async week=>{
         try{return {week,games:await liveNFL.loadWeek(season,week)};}
         catch(e){return {week,games:[],error:e.message};}
-      }));
+      });
       const games=boards.flatMap(x=>x.games.map(g=>({...g,week:x.week})))
         .filter(g=>g.status==='final'&&g.teams.some(t=>String(t.id)===String(team)));
       // D/ST history is a read-only view of already persisted, verified game data.
       // Never fetch every box score or mutate defensive stats during a profile request.
       // The background scoring sync owns ingestion and reconciliation.
       if(player.position==='D/ST'){
-        const weeks=await Promise.all(games.map(async game=>{
+        const weeks=await mapBounded(games,2,async game=>{
           const opponent=game.teams.find(t=>String(t.id)!==String(team));
           try{
             const result=await defenseStore.get(pool,season,game,team,settingsOf(current.state).scoring);
@@ -1437,7 +1442,7 @@ async function api(req,res,route){
               unsupported:result.unsupported,provisional:!result.complete};
           }catch(e){console.warn('Read-only D/ST history:',game.id,e.message);
             return {week:game.week,gameId:game.id,status:'UNAVAILABLE',opponent:opponent?.abbreviation||null,error:'Stored defensive statistics unavailable'};}
-        }));
+        });
         weeks.sort((a,b)=>b.week-a.week);
         const scored=weeks.filter(w=>w.status==='final');
         const total=Math.round(scored.reduce((n,w)=>n+w.points,0)*100)/100;
@@ -1449,7 +1454,7 @@ async function api(req,res,route){
         playerHistoryCache.set(key,{at:Date.now(),value});
         return send(res,200,value);
       }
-      const weeks=await Promise.all(games.map(async game=>{
+      const weeks=await mapBounded(games,2,async game=>{
         try{
           const summary=await liveNFL.fetchGame(game.id);
           const stats=liveNFL.playerStats(summary);
@@ -1466,7 +1471,7 @@ async function api(req,res,route){
           return {week:game.week,gameId:game.id,status:'final',opponent:game.teams.find(t=>String(t.id)!==String(team))?.abbreviation||null,
             points:result.points,breakdown:result.breakdown,statDetails:isDefense?result.statDetails:undefined,unsupported:result.unsupported,provisional:true};
         }catch(e){return {week:game.week,gameId:game.id,status:'UNAVAILABLE',error:'Game statistics unavailable'};}
-      }));
+      });
       weeks.sort((a,b)=>b.week-a.week);
       const scored=weeks.filter(w=>w.status==='final');
       const value={player:{id,name:player.name,position:player.position},season,weeks,
@@ -1853,11 +1858,11 @@ async function syncNFLScoring(){
     if(!(state.frozenMatchupSchedule?.[week]||[]).length)return;
     const games=await liveNFL.loadWeek(season,week);
     const summaries=new Map(),failures=[];
-    await Promise.all(games.filter(g=>g.status!=='upcoming').map(async g=>{
+    await mapBounded(games.filter(g=>g.status!=='upcoming'),2,async g=>{
       try{const summary=await liveNFL.fetchGame(g.id);
         summaries.set(g.id,{summary,players:liveNFL.playerStats(summary),events:liveNFL.playEvents(summary)});}
       catch(e){failures.push(g.id+': '+e.message);}
-    }));
+    });
     for(const [gameId,box] of summaries){
       const game=games.find(g=>String(g.id)===String(gameId));
       if(game)await defenseStore.ingest(pool,season,game,box.summary);
@@ -2107,10 +2112,10 @@ async function syncPlayerDirectory(){
     }
     const completed=weeks.flatMap(x=>x.games.map(g=>({...g,week:x.week})))
       .filter(g=>g.status==='final');
-    const boxscores=await Promise.all(completed.map(async game=>{
+    const boxscores=await mapBounded(completed,2,async game=>{
       try{const summary=await liveNFL.fetchGame(game.id);return {game,stats:liveNFL.playerStats(summary),events:liveNFL.playEvents(summary)};}
       catch(e){console.warn('Directory game',game.id,e.message);return null;}
-    }));
+    });
     await change(s=>{
       const directory={...(s.nflWeeklyDirectory||{})};
       for(const entry of boxscores.filter(Boolean)){
@@ -2256,11 +2261,11 @@ async function updatePostseason(){
   const weeks=!state.postseason?.locked?[end]:phase==='opening'?[14]:phase==='semis'?[15,16]:phase==='finals'?[17,18]:[];
   const season=Number(state.scheduleSeason||process.env.NFL_SEASON||new Date().getUTCFullYear());
   const finalWeeks={};
-  await Promise.all(weeks.map(async week=>{
+  await mapBounded(weeks,2,async week=>{
    try{const games=await liveNFL.loadWeek(season,week);
     finalWeeks[week]=games.length>0&&games.every(g=>g.status==='final');}
    catch(e){finalWeeks[week]=false;}
-  }));
+  });
   if(!Object.values(finalWeeks).some(Boolean))return;
   await change((s,a)=>{
    const verified=w=>Boolean(finalWeeks[w]&&s.postseasonNFLFinal?.[w]);
