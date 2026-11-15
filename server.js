@@ -101,11 +101,25 @@ async function faWeeklyESPN(season,week){
   if(faWeeklyFeedPending.has(key))return faWeeklyFeedPending.get(key);
   const job=(async()=>{
     const url=`https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/${season}/players?scoringPeriodId=${week}&view=kona_player_info`;
-    const res=await fetch(url,{headers:{Accept:'application/json',
-      'X-Fantasy-Filter':JSON.stringify({players:{limit:1500,offset:0}})},signal:AbortSignal.timeout(20000)});
-    if(!res.ok)throw Error('ESPN weekly feed HTTP '+res.status);
-    const raw=await res.json(),entries=Array.isArray(raw)?raw:raw.players||[];
-    const players={};for(const item of entries){const entry=faWeeklyRecord(item,week);if(entry.id!=='undefined')players[entry.id]=entry;}
+    const pageSize=500, maxPages=20;
+    const players={};
+    let completed=false;
+    for(let page=0;page<maxPages;page++){
+      const res=await fetch(url,{headers:{Accept:'application/json',
+        'X-Fantasy-Filter':JSON.stringify({players:{limit:pageSize,offset:page*pageSize}})},
+        signal:AbortSignal.timeout(20000)});
+      if(!res.ok)throw Error('ESPN weekly feed HTTP '+res.status+' at offset '+page*pageSize);
+      const raw=await res.json();
+      const entries=Array.isArray(raw)?raw:Array.isArray(raw?.players)?raw.players:null;
+      if(!entries)throw Error('Unexpected ESPN weekly feed response at offset '+page*pageSize);
+      for(const item of entries){
+        const entry=faWeeklyRecord(item,week);
+        if(entry.id!=='undefined'&&entry.id!=='null')players[entry.id]=entry;
+      }
+      if(entries.length<pageSize){completed=true;break;}
+    }
+    // Never cache a partial directory as complete: it would silently hide players.
+    if(!completed)throw Error('ESPN weekly feed exceeded '+maxPages+' pages; directory incomplete');
     if(!Object.keys(players).length)throw Error('Empty ESPN weekly feed');
     const result={at:Date.now(),players};faWeeklyFeedCache.set(key,result);
     while(faWeeklyFeedCache.size>2)faWeeklyFeedCache.delete(faWeeklyFeedCache.keys().next().value);
@@ -1273,6 +1287,57 @@ async function api(req,res,route){
     else await pool.query('DELETE FROM fantasy_audible_chat_mutes WHERE manager=$1',[target]);
     return send(res,200,{ok:true});
   }
+  // Read-only commissioner diagnostic: identify duplicate weekly fixtures or
+  // lineup snapshots without altering finalized results or league standings.
+  if(req.method==='GET'&&route==='/api/diagnostics/matchup-integrity'){
+    if(!user.commissioner)return send(res,403,{error:'Commissioner only'});
+    const issues=[],weeks=[];
+    for(const [weekKey,ledger] of Object.entries(current.state.weeklyLedger||{})){
+      const week=Number(weekKey);
+      const matches=Object.values(ledger?.matchups||{});
+      const fixtureIds=new Set(),participants=new Set(),lineupFingerprints=new Map();
+      const scheduled=current.state.frozenMatchupSchedule?.[week]||[];
+      const scheduledById=new Map(scheduled.map(f=>[String(f.id),f]));
+      for(const m of matches){
+        const fixture=scheduledById.get(String(m.id));
+        if(!fixture)issues.push({week,matchId:m.id,type:'MATCHUP_NOT_IN_FROZEN_SCHEDULE'});
+        else if(String(fixture.home)!==String(m.home)||String(fixture.away)!==String(m.away))
+          issues.push({week,matchId:m.id,type:'MATCHUP_TEAMS_DIFFER_FROM_SCHEDULE',
+            scheduled:{home:fixture.home,away:fixture.away},stored:{home:m.home,away:m.away}});
+        for(const side of ['homeLineup','awayLineup']){
+          const lineup=m[side];
+          const manager=String(m[side==='homeLineup'?'home':'away']);
+          for(const p of Array.isArray(lineup)?lineup:[]){
+            const snapshotOwner=String(p.owner??'');
+            if(snapshotOwner&&snapshotOwner!==manager)
+              issues.push({week,matchId:m.id,type:'SNAPSHOT_OWNER_MISMATCH',side,playerId:String(p.id)});
+          }
+        }
+        const pair=[String(m.home),String(m.away)].sort().join(':');
+        if(fixtureIds.has(pair))issues.push({week,matchId:m.id,type:'DUPLICATE_PAIR',pair});
+        fixtureIds.add(pair);
+        for(const manager of [m.home,m.away]){
+          if(participants.has(String(manager)))issues.push({week,matchId:m.id,type:'MANAGER_IN_MULTIPLE_MATCHUPS',manager});
+          participants.add(String(manager));
+        }
+        for(const side of ['homeLineup','awayLineup']){
+          const lineup=m[side];
+          if(!Array.isArray(lineup)){issues.push({week,matchId:m.id,type:'MISSING_LINEUP',side});continue;}
+          const ids=lineup.map(p=>String(p.id)).sort();
+          if(new Set(ids).size!==ids.length)issues.push({week,matchId:m.id,type:'DUPLICATE_PLAYER_IN_LINEUP',side});
+          const fingerprint=JSON.stringify(ids);
+          if(ids.length&&lineupFingerprints.has(fingerprint))
+            issues.push({week,matchId:m.id,type:'IDENTICAL_LINEUP_IDS',side,other:lineupFingerprints.get(fingerprint)});
+          else if(ids.length)lineupFingerprints.set(fingerprint,{matchId:m.id,side});
+        }
+      }
+      for(const fixture of scheduled)if(!matches.some(m=>String(m.id)===String(fixture.id)))
+        issues.push({week,matchId:fixture.id,type:'SCHEDULED_MATCHUP_MISSING_FROM_LEDGER'});
+      weeks.push({week,matchups:matches.length,final:matches.filter(m=>m.status==='final').length,
+        provisional:matches.filter(m=>m.status!=='final').length});
+    }
+    return send(res,200,{weeks,issues,issueCount:issues.length,readOnly:true});
+  }
   if(req.method==='GET'&&route==='/api/espn/players'){
     try{const data=await draftPool();return send(res,200,{...data,count:data.players.length});}
     catch(e){return send(res,503,{error:'ESPN player data is not available yet',details:e.message});}}
@@ -1298,7 +1363,9 @@ async function api(req,res,route){
         for(const [id,live] of Object.entries(weeklyFeed.players)){
           if(!players[id])continue;
           players[id].injuryStatus=live.injuryStatus;
-          players[id].teamId=live.teamId||players[id].teamId;
+          // ESPN proTeamId=0 means NFL free agent; never treat it as a scheduled team.
+          if(live.teamId!==null&&live.teamId!==undefined)
+            players[id].teamId=String(live.teamId)==='0'?null:String(live.teamId);
           const projected=faStatProjection({stats:live.projectedStats},players[id].position,settingsOf(current.state).scoring);
           players[id].weeklyProjectedPoints=projected;
           players[id].projectionMethod=projected===null?'STAT_PROJECTION_UNAVAILABLE':(players[id].position==='K'?'LEAGUE_SCORED_ESPN_STATS_K_50PLUS_APPROX':players[id].position==='D/ST'?'LEAGUE_SCORED_ESPN_STATS_DST_TIER_APPROX':'LEAGUE_SCORED_ESPN_STATS');
@@ -1325,7 +1392,13 @@ async function api(req,res,route){
           if(rank){entry.oprk=rank.rank;entry.oprkAverageAllowed=rank.averageAllowed;entry.oprkSample=rank.sample;}
         }
       }catch(e){console.warn('Historical matchup analytics unavailable:',e.message);}
-      return send(res,200,{season,week,players,updatedAt:new Date().toISOString(),
+      const coverage={directoryPlayers:directory.players.length,
+        weeklyFeedPlayers:weeklyFeed?Object.keys(weeklyFeed.players).length:0,
+        matchedWeeklyPlayers:weeklyFeed?Object.keys(weeklyFeed.players).filter(id=>Object.hasOwn(players,id)).length:0,
+        playersWithoutTeam:Object.values(players).filter(p=>p.teamId==null||p.teamId==='0').length,
+        playersWithoutWeeklyProjection:Object.values(players).filter(p=>p.weeklyProjectedPoints===null).length,
+        weeklyFeedStale:Boolean(weeklyFeed?.stale)};
+      return send(res,200,{season,week,players,coverage,updatedAt:new Date().toISOString(),
         historicalMethod:historical?.method||'Unavailable',historicalGames:historical?.gamesProcessed||0,
         projectionStatus:weeklyFeed&&!weeklyFeed.stale?'LEAGUE_SCORED_ESPN_STATS':'UNAVAILABLE',oprkStatus:historical&&Object.keys(historical.rankings).length?'HISTORICAL_32_TEAM_RANK':'UNAVAILABLE',
         notice:'Projections use ESPN projected statistics and league scoring, never ESPN fantasy-point totals. K 50+ field goals use the 50-59 scoring tier; D/ST projected mean points/yards allowed select approximate tiers. Missing projected stats remain unavailable. OPRK is historical.'});
@@ -1362,7 +1435,14 @@ async function api(req,res,route){
       if(!teamId)return send(res,200,{id,season,week,status:'unavailable',notice:'No verified NFL team assignment'});
       const games=await liveNFL.loadWeek(season,week);
       const game=games.find(g=>g.teams.some(t=>String(t.id)===teamId));
-      if(!game)return send(res,200,{id,season,week,status:'bye',notice:'No NFL game scheduled for this player this week'});
+      if(!game){
+        // A missing scoreboard game is not proof of a bye; verify all 17 team games.
+        let verifiedBye=false;
+        try{verifiedBye=await liveNFL.verifyTeamBye(season,week,teamId);}
+        catch(e){console.warn('NFL bye verification unavailable:',e.message);}
+        return send(res,200,{id,season,week,status:verifiedBye?'bye':'unavailable',
+          notice:verifiedBye?'Verified NFL bye week':'NFL game missing from scoreboard; bye not verified'});
+      }
       const own=game.teams.find(t=>String(t.id)===teamId),opponent=game.teams.find(t=>String(t.id)!==teamId);
       const result={id,season,week,player:{name:athlete.name,position:athlete.position,team:own?.abbreviation},
         game:{id:game.id,status:game.status,kickoff:game.kickoff,team:own?.abbreviation,opponent:opponent?.abbreviation,
@@ -2033,13 +2113,20 @@ async function reconcileHistoricalMatchups(){
    await change((s,accounts)=>{
     const matches=s.weeklyLedger?.[week]?.matchups||{};
     for(const u of updates){
-     const match=matches[u.matchId];if(!match)continue;
+     const match=matches[u.matchId];if(!match||match.status==='final')continue;
+     const scheduled=(s.frozenMatchupSchedule?.[week]||[]).find(x=>String(x.id)===String(match.id));
+     if(!scheduled||String(scheduled.home)!==String(match.home)||String(scheduled.away)!==String(match.away))continue;
      const entry=(match[u.side]||[]).find(x=>String(x.id)===u.id);
      if(!entry||entry.scoringMode&&entry.scoringMode!=='later')continue;
      // Candidate selection already checked a persisted later-kickoff swap.
      // Never reconstruct or mutate a historical lineup from today's roster.
      entry.points=u.points;
      entry.liveScoreStatus=u.bye?'BYE':u.inactive?'INACTIVE':'UPDATED';
+     // Bind verified points to the specific NFL game and league week.
+     // A stale UPDATED flag alone is insufficient evidence of this week's score.
+     entry.verifiedScoreWeek=week;
+     entry.verifiedScoreGameId=u.game?String(u.game.id):null;
+     entry.verifiedScoreTeamId=u.team?String(u.team):null;
      if(u.finalDSTSnapshot){
        entry.finalScoreSource='FROZEN_DST_SNAPSHOT';
        entry.finalScoreGameId=String(u.game.id);
@@ -2058,18 +2145,45 @@ async function reconcileHistoricalMatchups(){
      const home=match.homeLineup,away=match.awayLineup;
      // Final results are immutable: do not recompute them from later data.
      if(match.status==='final')continue;
+     const scheduled=(s.frozenMatchupSchedule?.[week]||[]).find(x=>String(x.id)===String(match.id));
+     if(!scheduled||String(scheduled.home)!==String(match.home)||String(scheduled.away)!==String(match.away)){
+      match.warning='Verification blocked: saved matchup managers differ from the frozen schedule.';
+      match.snapshotIntegrityIssues=[{reason:'SCHEDULE_PAIRING_MISMATCH'}];
+      continue;
+     }
+     if(match.snapshotIntegrityIssues?.length){
+      match.warning='Verification blocked: unresolved lineup snapshot integrity issues.';
+      continue;
+     }
      if(!Array.isArray(home)||!Array.isArray(away)){
       match.warning='Verification blocked: historical lineup snapshot is missing.';
       continue;
      }
+     // A valid fixture needs both managers' recorded starters. Empty sides
+     // and duplicated player IDs cannot be certified as a completed matchup.
+     if(!home.length||!away.length){
+      match.warning='Verification blocked: one or both historical lineups are empty.';
+      continue;
+     }
      const lineup=[...home,...away];
+     const lineupIds=lineup.map(p=>String(p.id));
+     if(new Set(lineupIds).size!==lineupIds.length){
+      match.warning='Verification blocked: duplicate player IDs in historical matchup.';
+      match.snapshotIntegrityIssues=[{reason:'DUPLICATE_PLAYER_IN_MATCHUP'}];
+      continue;
+     }
      const unresolved=lineup.filter(p=>
        (p.scoringMode&&!(p.scoringMode==='later'&&s.injurySwapHistory?.some(x=>
          Number(x.week)===week&&x.mode==='later'&&String(x.replacementId)===String(p.id)&&
          String(x.manager)===String(match[home.includes(p)?'home':'away'])))) ||
        !(p.liveScoreStatus==='UPDATED'||p.liveScoreStatus==='BYE'&&p.byeVerified===true&&p.points===0||
        p.liveScoreStatus==='INACTIVE'&&p.inactiveVerified===true&&p.points===0) ||
-       !Number.isFinite(p.points));
+       !Number.isFinite(p.points) ||
+       Number(p.verifiedScoreWeek)!==week ||
+       (p.liveScoreStatus==='UPDATED'&&
+        (!p.verifiedScoreGameId||
+         !games.some(g=>String(g.id)===String(p.verifiedScoreGameId)&&
+           g.teams.some(t=>String(t.id)===String(p.verifiedScoreTeamId))))));
      if(!weekGamesFinal){
       match.warning='Verification blocked: NFL games are not all final.';
      }else if(!lineup.length){
