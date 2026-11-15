@@ -1227,8 +1227,10 @@ function chatBodyHtml(body){
       const trustedGiphy=(host==='media.giphy.com'||/^media[0-9]+\.giphy\.com$/.test(host))&&/\.(gif|webp)$/i.test(parsed.pathname);
       const trustedTenor=(host==='media.tenor.com'||host==='c.tenor.com')&&/\.(gif|webp)$/i.test(parsed.pathname);
       const safe=esc(url);
-      html+=`<a href="${safe}" target="_blank" rel="noopener noreferrer">${safe}</a>`;
-      if(direct||trustedGiphy||trustedTenor)html+=`<div><img class="fa-chat-gif" src="${safe}" alt="Shared GIF" loading="lazy" referrerpolicy="no-referrer"></div>`;
+      if(direct||trustedGiphy||trustedTenor){
+        // Keep a link as fallback if the image cannot load, but hide the raw URL normally.
+        html+=`<div><img class="fa-chat-gif" src="${safe}" alt="Shared GIF" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'"><a href="${safe}" target="_blank" rel="noopener noreferrer" style="display:none">${safe}</a></div>`;
+      }else html+=`<a href="${safe}" target="_blank" rel="noopener noreferrer">${safe}</a>`;
     }else html+=esc(url);
     cursor=match.index+raw.length;
     html+=esc(raw.slice(url.length));
