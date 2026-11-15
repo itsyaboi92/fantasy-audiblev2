@@ -2191,7 +2191,7 @@ async function faSyncRosterStatuses(){
   }catch(e){console.warn('All-roster injury sync:',e.message);}
   finally{faRosterStatusPolling=false;}
 }
-const injuryStatuses=new Set(['QUESTIONABLE','DOUBTFUL','OUT','IR','INJURED_RESERVE']);
+const injuryStatuses=new Set(['QUESTIONABLE','DOUBTFUL','OUT','IR','INJURED_RESERVE','INJURY_RESERVE']);
 let injuryPolling=false;
 async function pollLiveInjuries(){
   if(injuryPolling)return;injuryPolling=true;
