@@ -103,3 +103,14 @@ test('reused matchup ID cannot silently reverse home and away managers',()=>{
  assert.equal(m.home,'m1');assert.equal(m.away,'m2');
  assert.equal(m.snapshotIntegrityIssues[0].reason,'SCHEDULE_PAIRING_MISMATCH');
 });
+
+test('schedule pairing mismatch is detected after NFL games are final',()=>{
+ const {s,games,accounts}=setup();
+ updateWeeklyLedger(s,accounts,9,games,[]);
+ const m=s.weeklyLedger[9].matchups['9-m1-m2'];
+ s.frozenMatchupSchedule[9][0].away='m3';
+ games[0].status='final';
+ updateWeeklyLedger(s,accounts,9,games,[]);
+ assert.equal(m.away,'m2');
+ assert.equal(m.snapshotIntegrityIssues[0].reason,'SCHEDULE_PAIRING_MISMATCH');
+});
