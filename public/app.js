@@ -1013,7 +1013,7 @@ function faForecastPlayer(p,week){
   const baseline=raw!==null&&raw!==undefined&&Number.isFinite(Number(raw))?Math.max(0,Number(raw)):null;
   const progress=faProjectionProgress(game);
   const injury=String(meta?.injuryStatus||p.injuryStatus||'').toUpperCase().replace(/[ -]/g,'_');
-  const explicitlyOut=['OUT','INJURED_RESERVE','IR','SUSPENDED','PUP','NON_FOOTBALL_INJURY'].includes(injury);
+  const explicitlyOut=['OUT','INJURED_RESERVE','INJURY_RESERVE','IR','SUSPENDED','PUP','NON_FOOTBALL_INJURY'].includes(injury);
   const schedule=nflMatchupCache[key]?.data;
   const hasVerifiedSchedule=Boolean(schedule&&schedule.teams&&Object.keys(schedule.teams).length);
   const onBye=Boolean(hasVerifiedSchedule&&teamId&&!game);
