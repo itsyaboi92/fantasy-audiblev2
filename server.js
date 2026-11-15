@@ -1396,7 +1396,27 @@ async function api(req,res,route){
           if(rank){entry.oprk=rank.rank;entry.oprkAverageAllowed=rank.averageAllowed;entry.oprkSample=rank.sample;}
         }
       }catch(e){console.warn('Historical matchup analytics unavailable:',e.message);}
+      const projectionDiagnostics={};
+      if(weeklyFeed){
+        for(const [id,live] of Object.entries(weeklyFeed.players)){
+          if(!Object.hasOwn(players,id))continue;
+          const pos=players[id].position||'UNKNOWN';
+          const row=projectionDiagnostics[pos]||={matched:0,withStatRecord:0,projected:0,missingStatFields:{}};
+          row.matched++;
+          const stats=live.projectedStats;
+          if(stats&&typeof stats==='object'&&!Array.isArray(stats)){
+            row.withStatRecord++;
+            if(players[id].weeklyProjectedPoints===null){
+              const required=pos==='QB'?['3','4','20']:pos==='RB'?['24','25','53','42']:pos==='WR'||pos==='TE'?['53','42','43']:pos==='K'?['74','77','80','86']:pos==='D/ST'?['95','96','99','120','127']:[];
+              for(const key of required)if(stats[key]==null)row.missingStatFields[key]=(row.missingStatFields[key]||0)+1;
+            }
+          }
+          if(players[id].weeklyProjectedPoints!==null)row.projected++;
+        }
+      }
       const coverage={directoryPlayers:directory.players.length,
+        projectionDiagnostics,
+        opponentRankedPlayers:Object.values(players).filter(p=>p.oprk!=null).length,
         weeklyFeedPlayers:weeklyFeed?Object.keys(weeklyFeed.players).length:0,
         matchedWeeklyPlayers:weeklyFeed?Object.keys(weeklyFeed.players).filter(id=>Object.hasOwn(players,id)).length:0,
         playersWithoutTeam:Object.values(players).filter(p=>p.teamId==null||p.teamId==='0').length,
