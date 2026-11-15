@@ -2422,12 +2422,12 @@ if(process.env.ENABLE_FULL_PLAYER_DIRECTORY_SYNC==='true'){
 }
 setInterval(activateLeagueSchedule,60000);
 setTimeout(activateLeagueSchedule,3000);
-setInterval(()=>resourceJobs.run('syncNFLScoring',syncNFLScoring),60000);
+if(process.env.ENABLE_LIVE_SCORING_SYNC!=='false')setInterval(()=>resourceJobs.run('syncNFLScoring',syncNFLScoring),60000);
 setInterval(()=>resourceJobs.run('reconcileHistoricalMatchups',reconcileHistoricalMatchups),30*60*1000);
 setTimeout(()=>resourceJobs.run('reconcileHistoricalMatchups',reconcileHistoricalMatchups),90*1000);
 setInterval(updatePostseason,60000);
 setTimeout(updatePostseason,20000);
-setTimeout(()=>resourceJobs.run('syncNFLScoring',syncNFLScoring),6000);
+if(process.env.ENABLE_LIVE_SCORING_SYNC!=='false')setTimeout(()=>resourceJobs.run('syncNFLScoring',syncNFLScoring),6000);
 let checkingWaivers=false;setInterval(async()=>{if(checkingWaivers)return;checkingWaivers=true;
   try{await processWaivers();}catch(e){console.error('Waiver processing:',e.message);}finally{checkingWaivers=false;}},30000);
 let checkingTimer=false;setInterval(async()=>{if(checkingTimer)return;checkingTimer=true;
