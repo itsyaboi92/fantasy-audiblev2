@@ -101,11 +101,25 @@ async function faWeeklyESPN(season,week){
   if(faWeeklyFeedPending.has(key))return faWeeklyFeedPending.get(key);
   const job=(async()=>{
     const url=`https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/${season}/players?scoringPeriodId=${week}&view=kona_player_info`;
-    const res=await fetch(url,{headers:{Accept:'application/json',
-      'X-Fantasy-Filter':JSON.stringify({players:{limit:1500,offset:0}})},signal:AbortSignal.timeout(20000)});
-    if(!res.ok)throw Error('ESPN weekly feed HTTP '+res.status);
-    const raw=await res.json(),entries=Array.isArray(raw)?raw:raw.players||[];
-    const players={};for(const item of entries){const entry=faWeeklyRecord(item,week);if(entry.id!=='undefined')players[entry.id]=entry;}
+    const pageSize=500, maxPages=20;
+    const players={};
+    let completed=false;
+    for(let page=0;page<maxPages;page++){
+      const res=await fetch(url,{headers:{Accept:'application/json',
+        'X-Fantasy-Filter':JSON.stringify({players:{limit:pageSize,offset:page*pageSize}})},
+        signal:AbortSignal.timeout(20000)});
+      if(!res.ok)throw Error('ESPN weekly feed HTTP '+res.status+' at offset '+page*pageSize);
+      const raw=await res.json();
+      const entries=Array.isArray(raw)?raw:Array.isArray(raw?.players)?raw.players:null;
+      if(!entries)throw Error('Unexpected ESPN weekly feed response at offset '+page*pageSize);
+      for(const item of entries){
+        const entry=faWeeklyRecord(item,week);
+        if(entry.id!=='undefined'&&entry.id!=='null')players[entry.id]=entry;
+      }
+      if(entries.length<pageSize){completed=true;break;}
+    }
+    // Never cache a partial directory as complete: it would silently hide players.
+    if(!completed)throw Error('ESPN weekly feed exceeded '+maxPages+' pages; directory incomplete');
     if(!Object.keys(players).length)throw Error('Empty ESPN weekly feed');
     const result={at:Date.now(),players};faWeeklyFeedCache.set(key,result);
     while(faWeeklyFeedCache.size>2)faWeeklyFeedCache.delete(faWeeklyFeedCache.keys().next().value);
