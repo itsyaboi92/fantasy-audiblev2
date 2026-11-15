@@ -1424,9 +1424,6 @@ function render(){if(!state||!manager)return;const mine=state.players.filter(x=>
   if(tab==='Commissioner'&&state.viewer.commissioner)content=`<h1>Commissioner Controls</h1>
     ${card('Draft management','<p>Manage the snake draft.</p><button onclick="changeTab(\'Draft\')">Open draft controls</button>')}
     ${commissionerDraftOrderUI()}
-    ${card('Attack on Tight End — injury event audit',`<p class="muted small">Read-only check of Mike Evans and Josh Jacobs: stored injury events, observed designations, and currently eligible bench replacements. Does not change rosters.</p><button onclick="downloadAttackInjuryDiagnostic()">Download injury audit</button>`)}
-    ${card('Week 9 — complete scoring diagnostic',`<p class="muted small">Commissioner-only, read-only JSON export of saved lineups, verification failures, D/ST category evidence, and injury-substitution history. No account credentials included.</p><button onclick="downloadWeek9ScoringDiagnostic()">Download Week 9 scoring report</button>`)}
-    ${card('Kyren Williams — Week 9 diagnostic',`<p class="muted small">Read-only commissioner diagnostic of stored matchup points, player identity, and substitution flags. Downloads a JSON report; no league data is changed.</p><button onclick="downloadKyrenDiagnostic()">Download Week 9 diagnostic</button>`)}
     ${card('Restart league',`<p><b>Destructive action:</b> clear the current draft order, all picks, draft history, drafted rosters, and injuries. Keep manager accounts, team names, commissioner scoring/roster rules, and each manager's draft preferences.</p>
       <p>The next draft will use your configured roster size (16 rounds by default).</p>
       <button onclick="restartLeague()" style="background:#a32121;color:white">Restart league / New draft</button>`)}
