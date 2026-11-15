@@ -560,7 +560,7 @@ async function publishLockerBot(){
     const posts=[];
     for(const edition of s.editorial||[])posts.push({key:`edition:${edition.id}`,body:botEditionText(edition)});
     for(const tx of s.transactions||[]){if(Date.parse(tx.at)<=since)continue;
-      const body=botEventText(s,tx);if(body)posts.push({key:`event:${tx.id}`,body});}
+      const body=botEventText(s,tx);if(body)posts.push({key:`event:${tx.id}`,body,mentions:tx.manager?[tx.manager]:[]});}
     // Verified live injury events, scoped to this league and deduplicated in PostgreSQL.
     // Only publish newly observed ESPN status transitions, never retroactive injuries.
     for(const injury of s.injuries||[]){
@@ -579,23 +579,35 @@ async function publishLockerBot(){
         'The medical staff has entered the fantasy group chat. Nobody is having a good time.',
         'The lineup was looking comfortable. Football had other plans.'
       ]);
-      posts.push({key,body:`🚨 THE AUDIBLE | LIVE INJURY: ${name} is now ${status} per ESPN (previously ${String(injury.previousDesignation||'unknown').replaceAll('_',' ')}). ${manager} has a problem. ${remark} Injury substitution eligibility depends on league rules.`});
+      posts.push({key,mentions:[player.owner],body:`🚨 THE AUDIBLE | LIVE INJURY: ${name} is now ${status} per ESPN (previously ${String(injury.previousDesignation||'unknown').replaceAll('_',' ')}). ${manager} has a problem. ${remark} Injury substitution eligibility depends on league rules.`});
     }
     // Only final scores; skip retroactive historic matchups on initial deployment.
     for(const post of botMatchupPosts(s)){
       const parts=post.key.split(':'),m=s.weeklyLedger?.[parts[1]]?.matchups?.[parts.slice(2).join(':')];
-      if(m&&Date.parse(m.updatedAt)>since)posts.push(post);
+      if(m&&Date.parse(m.updatedAt)>since)posts.push({...post,mentions:[m.home,m.away]});
     }
+    const delivered=[];
     const client=await pool.connect();
     try{await client.query('BEGIN');
-      for(const post of posts.slice(0,120))await client.query(`WITH inserted AS (
-        INSERT INTO fantasy_audible_bot_events(league_id,event_key) VALUES($1,$2)
-        ON CONFLICT DO NOTHING RETURNING event_key)
-        INSERT INTO fantasy_audible_chat(league_id,manager,body)
-        SELECT $1,$3,$4 FROM inserted`,[leagueId,post.key,BOT_MANAGER,post.body.slice(0,1000)]);
+      for(const post of posts.slice(0,120)){
+        const inserted=await client.query(`WITH inserted AS (
+          INSERT INTO fantasy_audible_bot_events(league_id,event_key) VALUES($1,$2)
+          ON CONFLICT DO NOTHING RETURNING event_key)
+          INSERT INTO fantasy_audible_chat(league_id,manager,body)
+          SELECT $1,$3,$4 FROM inserted RETURNING id`,[leagueId,post.key,BOT_MANAGER,post.body.slice(0,1000)]);
+        if(inserted.rowCount&&post.mentions?.length)delivered.push(post);
+      }
       await client.query('UPDATE fantasy_audible_bot_cursor SET last_at=NOW() WHERE league_id=$1',[leagueId]);
       await client.query('COMMIT');
     }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
+    // Only notify after the post has committed; no duplicate or speculative mentions.
+    for(const post of delivered){
+      for(const managerId of new Set(post.mentions)){
+        if(!s.managers.some(m=>m.id===managerId))continue;
+        try{await notifyManager(managerId,{title:'🎙️ The Audible mentioned your team',body:post.body.slice(0,180),url:'/?tab=Locker%20Room'});}
+        catch(e){console.warn('Audible mention push:',e.message);}
+      }
+    }
   }catch(e){console.error('Locker Room bot:',e.message);}finally{botBusy=false;}
 }
 function safeState(s,accounts,user){return {...s,trades:tradeCentral.publicTrades(s,user.manager),editorial:(s.editorial||[]).slice(0,48),matchupSchedule:s.frozenMatchupSchedule||{},standings:leagueStandings(s,accounts),settings:settingsOf(s),managers:s.managers.map(m=>({...m,
