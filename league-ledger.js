@@ -22,6 +22,8 @@ function updateWeeklyLedger(s,accounts,week,games,failures){
     const prior=entry.matchups[match.id];if(prior?.status==='final')continue;
     // A completed week's frozen lineup must never be rebuilt from today's
     // roster. Historical reconciliation updates the saved entries directly.
+    // A previously captured lineup is the authority once games finish.
+    // Never finalize an unverified snapshot merely because the NFL slate ended.
     if(prior&&allFinal)continue;
     const homeLineup=ledgerLineup(s,match.home,week),awayLineup=ledgerLineup(s,match.away,week);
     // Never silently replace a previously captured starter after that player's
@@ -48,6 +50,25 @@ function updateWeeklyLedger(s,accounts,week,games,failures){
             Number(x.week)===week&&String(x.manager)===String(manager)&&
             String(x.removedId)===String(old.id));
           if(!approved)changedSides.push({side,playerId:String(old.id)});
+        }
+      }
+      // A substitution history entry alone does not authorize arbitrary
+      // replacements: require the incoming player to match the recorded swap.
+      for(const [side,manager,next] of [
+        ['homeLineup',match.home,homeLineup],['awayLineup',match.away,awayLineup]]){
+        const previous=prior[side]||[];
+        const previousIds=new Set(previous.map(p=>String(p.id)));
+        const nextIds=new Set(next.map(p=>String(p.id)));
+        for(const old of previous){
+          if(nextIds.has(String(old.id)))continue;
+          const game=gameByTeam.get(String(old.nflTeamId??old.team??''));
+          const kickoff=Date.parse(game?.kickoff||'');
+          if(!Number.isFinite(kickoff)||Date.now()<kickoff)continue;
+          const swaps=(s.injurySwapHistory||[]).filter(x=>
+            Number(x.week)===week&&String(x.manager)===String(manager)&&
+            String(x.removedId)===String(old.id));
+          if(swaps.length&&!swaps.some(x=>nextIds.has(String(x.replacementId))))
+            changedSides.push({side,playerId:String(old.id),reason:'RECORDED_REPLACEMENT_NOT_IN_LINEUP'});
         }
       }
       if(changedSides.length){
