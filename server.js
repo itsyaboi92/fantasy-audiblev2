@@ -2113,7 +2113,9 @@ async function reconcileHistoricalMatchups(){
    await change((s,accounts)=>{
     const matches=s.weeklyLedger?.[week]?.matchups||{};
     for(const u of updates){
-     const match=matches[u.matchId];if(!match)continue;
+     const match=matches[u.matchId];if(!match||match.status==='final')continue;
+     const scheduled=(s.frozenMatchupSchedule?.[week]||[]).find(x=>String(x.id)===String(match.id));
+     if(!scheduled||String(scheduled.home)!==String(match.home)||String(scheduled.away)!==String(match.away))continue;
      const entry=(match[u.side]||[]).find(x=>String(x.id)===u.id);
      if(!entry||entry.scoringMode&&entry.scoringMode!=='later')continue;
      // Candidate selection already checked a persisted later-kickoff swap.
@@ -2138,6 +2140,16 @@ async function reconcileHistoricalMatchups(){
      const home=match.homeLineup,away=match.awayLineup;
      // Final results are immutable: do not recompute them from later data.
      if(match.status==='final')continue;
+     const scheduled=(s.frozenMatchupSchedule?.[week]||[]).find(x=>String(x.id)===String(match.id));
+     if(!scheduled||String(scheduled.home)!==String(match.home)||String(scheduled.away)!==String(match.away)){
+      match.warning='Verification blocked: saved matchup managers differ from the frozen schedule.';
+      match.snapshotIntegrityIssues=[{reason:'SCHEDULE_PAIRING_MISMATCH'}];
+      continue;
+     }
+     if(match.snapshotIntegrityIssues?.length){
+      match.warning='Verification blocked: unresolved lineup snapshot integrity issues.';
+      continue;
+     }
      if(!Array.isArray(home)||!Array.isArray(away)){
       match.warning='Verification blocked: historical lineup snapshot is missing.';
       continue;
