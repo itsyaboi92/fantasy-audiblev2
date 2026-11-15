@@ -41,6 +41,27 @@ function pushAuthDiagnostics(endpoint){
   return result;
 }
 
+// Inspect generated VAPID JWT metadata only; never log the JWT or signing keys.
+function pushJwtDiagnostics(endpoint){
+  try{
+    const audience=new URL(endpoint).origin;
+    const subject=process.env.VAPID_SUBJECT||'mailto:admin@example.com';
+    const headers=webpush.getVapidHeaders(audience,subject,PUSH_PUBLIC_KEY,PUSH_PRIVATE_KEY,'aes128gcm');
+    const authorization=headers.Authorization||headers.authorization||'';
+    const token=authorization.match(/(?:^|\\s)t=([^,\\s]+)/)?.[1]||authorization.match(/^WebPush\\s+([^\\s]+)/i)?.[1];
+    if(!token)return {generated:false,authorizationScheme:authorization.split(' ')[0]||null};
+    const parts=token.split('.');
+    if(parts.length!==3)return {generated:true,segments:parts.length};
+    const header=JSON.parse(Buffer.from(parts[0],'base64url').toString('utf8'));
+    const claims=JSON.parse(Buffer.from(parts[1],'base64url').toString('utf8'));
+    const now=Math.floor(Date.now()/1000);
+    const keyBytes=Buffer.from(PUSH_PUBLIC_KEY,'base64url');
+    const key=crypto.createPublicKey({key:{kty:'EC',crv:'P-256',x:keyBytes.subarray(1,33).toString('base64url'),y:keyBytes.subarray(33,65).toString('base64url')},format:'jwk'});
+    const signatureValid=crypto.verify('sha256',Buffer.from(parts[0]+'.'+parts[1]),{key,dsaEncoding:'ieee-p1363'},Buffer.from(parts[2],'base64url'));
+    return {generated:true,algorithm:header.alg||null,type:header.typ||null,audienceMatches:claims.aud===audience,expirationSeconds:typeof claims.exp==='number'?claims.exp-now:null,subjectScheme:typeof claims.sub==='string'?(claims.sub.startsWith('mailto:')?'mailto':claims.sub.startsWith('https://')?'https':'other'):null,signatureValid};
+  }catch(e){return {generated:false,errorType:e.name||'Error'};}
+}
+
 // Fresh ESPN weekly data, separate from the six-hour draft directory cache.
 // Null is unknown; zero is a legitimate ESPN weekly projection.
 const faWeeklyFeedCache=new Map();
@@ -2167,7 +2188,7 @@ async function notifyManager(manager,payload){
     try{await webpush.sendNotification(row.subscription,JSON.stringify(payload),{TTL:300});sent=true;}
     catch(e){if(e.statusCode===404||e.statusCode===410)
       await pool.query('DELETE FROM fantasy_audible_push WHERE endpoint=$1',[row.endpoint]);
-      else console.error('Push delivery:',JSON.stringify({statusCode:e.statusCode||null,message:e.message,body:typeof e.body==='string'?e.body.slice(0,300):null,diagnostics:pushAuthDiagnostics(row.endpoint)}));}
+      else console.error('Push delivery:',JSON.stringify({statusCode:e.statusCode||null,message:e.message,body:typeof e.body==='string'?e.body.slice(0,300):null,diagnostics:pushAuthDiagnostics(row.endpoint),jwtDiagnostics:pushJwtDiagnostics(row.endpoint)}));}
   }));return sent;
 }
 let faRosterStatusPolling=false;
