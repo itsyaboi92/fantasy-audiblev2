@@ -101,7 +101,10 @@ function leagueStandings(s,accounts){
   const result={};for(const m of s.managers)result[m.id]={manager:m.id,wins:0,losses:0,ties:0,pointsFor:0,pointsAgainst:0};
   for(const [weekNumber,week] of Object.entries(s.weeklyLedger||{}))for(const match of Object.values(week.matchups||{})){
     if(Number(weekNumber)>postseason.endWeek(s.managers.filter(m=>accounts.some(a=>a.manager===m.id)).length))continue;
-    if(match.status!=='final'||!result[match.home]||!result[match.away])continue;
+    const fixture=(s.frozenMatchupSchedule?.[weekNumber]||[]).find(f=>String(f.id)===String(match.id));
+    if(match.status!=='final'||!result[match.home]||!result[match.away]||
+      !fixture||String(fixture.home)!==String(match.home)||String(fixture.away)!==String(match.away)||
+      match.snapshotIntegrityIssues?.length||!Number.isFinite(match.homeScore)||!Number.isFinite(match.awayScore))continue;
     const a=result[match.home],b=result[match.away];a.pointsFor+=match.homeScore;a.pointsAgainst+=match.awayScore;
     b.pointsFor+=match.awayScore;b.pointsAgainst+=match.homeScore;
     if(match.homeScore===match.awayScore){a.ties++;b.ties++;}
