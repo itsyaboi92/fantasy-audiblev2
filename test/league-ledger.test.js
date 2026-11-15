@@ -81,3 +81,25 @@ test('incomplete player scoring remains provisional even with final games',()=>{
  updateWeeklyLedger(s,accounts,9,games,[]);
  assert.equal(s.weeklyLedger[9].matchups['9-m1-m2'].status,'provisional');
 });
+
+test('reused matchup ID cannot silently change the saved manager pairing',()=>{
+ const {s,games,accounts}=setup();
+ updateWeeklyLedger(s,accounts,9,games,[]);
+ const m=s.weeklyLedger[9].matchups['9-m1-m2'];
+ const originalHome=m.homeLineup.map(p=>p.id);
+ s.frozenMatchupSchedule[9][0].home='m3';
+ updateWeeklyLedger(s,accounts,9,games,[]);
+ assert.equal(m.home,'m1');
+ assert.deepEqual(m.homeLineup.map(p=>p.id),originalHome);
+ assert.equal(m.snapshotIntegrityIssues[0].reason,'SCHEDULE_PAIRING_MISMATCH');
+});
+test('reused matchup ID cannot silently reverse home and away managers',()=>{
+ const {s,games,accounts}=setup();
+ updateWeeklyLedger(s,accounts,9,games,[]);
+ const m=s.weeklyLedger[9].matchups['9-m1-m2'];
+ s.frozenMatchupSchedule[9][0].home='m2';
+ s.frozenMatchupSchedule[9][0].away='m1';
+ updateWeeklyLedger(s,accounts,9,games,[]);
+ assert.equal(m.home,'m1');assert.equal(m.away,'m2');
+ assert.equal(m.snapshotIntegrityIssues[0].reason,'SCHEDULE_PAIRING_MISMATCH');
+});
