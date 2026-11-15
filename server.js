@@ -2122,6 +2122,11 @@ async function reconcileHistoricalMatchups(){
      // Never reconstruct or mutate a historical lineup from today's roster.
      entry.points=u.points;
      entry.liveScoreStatus=u.bye?'BYE':u.inactive?'INACTIVE':'UPDATED';
+     // Bind verified points to the specific NFL game and league week.
+     // A stale UPDATED flag alone is insufficient evidence of this week's score.
+     entry.verifiedScoreWeek=week;
+     entry.verifiedScoreGameId=u.game?String(u.game.id):null;
+     entry.verifiedScoreTeamId=u.team?String(u.team):null;
      if(u.finalDSTSnapshot){
        entry.finalScoreSource='FROZEN_DST_SNAPSHOT';
        entry.finalScoreGameId=String(u.game.id);
@@ -2161,7 +2166,12 @@ async function reconcileHistoricalMatchups(){
          String(x.manager)===String(match[home.includes(p)?'home':'away'])))) ||
        !(p.liveScoreStatus==='UPDATED'||p.liveScoreStatus==='BYE'&&p.byeVerified===true&&p.points===0||
        p.liveScoreStatus==='INACTIVE'&&p.inactiveVerified===true&&p.points===0) ||
-       !Number.isFinite(p.points));
+       !Number.isFinite(p.points) ||
+       Number(p.verifiedScoreWeek)!==week ||
+       (p.liveScoreStatus==='UPDATED'&&
+        (!p.verifiedScoreGameId||
+         !games.some(g=>String(g.id)===String(p.verifiedScoreGameId)&&
+           g.teams.some(t=>String(t.id)===String(p.verifiedScoreTeamId))))));
      if(!weekGamesFinal){
       match.warning='Verification blocked: NFL games are not all final.';
      }else if(!lineup.length){
