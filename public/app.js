@@ -131,7 +131,7 @@ function faSubRisk(x,starter,mode){
   const remaining=Math.max(0,expected-already);
   const gain=remaining-keep;
   const health=String(meta?.injuryStatus||x.injuryStatus||'UNKNOWN').toUpperCase();
-  const unavailable=['OUT','IR','INJURED_RESERVE','SUSPENDED'].includes(health);
+  const unavailable=['OUT','IR','INJURED_RESERVE','INJURY_RESERVE','SUSPENDED'].includes(health);
   const uncertain=['DOUBTFUL','QUESTIONABLE','UNKNOWN'].includes(health);
   const sigma=faPlayerSigma(meta,remaining);
   const conditional=1-faNormalCdf((keep-remaining)/sigma.sigma);
@@ -338,7 +338,7 @@ function breakdownCard(){
 }
 
 function injuryLabel(status){const v=String(status||'UNKNOWN').toUpperCase();
-  if(['QUESTIONABLE','DOUBTFUL','OUT'].includes(v))return `<span class="pill warn">${esc(v)}</span>`;
+  if(['QUESTIONABLE','DOUBTFUL','OUT','IR','INJURED_RESERVE','INJURY_RESERVE'].includes(v))return `<span class="pill warn">${esc(v)}</span>`;
   if(['ACTIVE','HEALTHY'].includes(v))return '<span class="pill">Healthy</span>';
   return `<span class="muted small">${esc(v)}</span>`;}
 function myCounts(){const counts=Object.fromEntries(POSITIONS.map(x=>[x,0]));
@@ -702,7 +702,7 @@ function optimizeProjectedLineup(){
   }
   const available=mine.filter(p=>p.slot!=='IR'&&!fixedIds.has(p.id)&&!playerGameLocked(p)&&
     !p.scoringMode&&p.scoreAtSwap===undefined&&!state.injuries?.some(i=>i.active&&i.player===p.id)&&
-    !['OUT','IR','INJURED_RESERVE','PUP','NFI'].includes(String(p.injuryStatus||'').toUpperCase())&&
+    !['OUT','IR','INJURED_RESERVE','INJURY_RESERVE','PUP','NFI'].includes(String(p.injuryStatus||'').toUpperCase())&&
     playerProjection(p)!==null);
   const open=slots.filter(slot=>!(slot.key in fixed));
   // DP assigns at most one slot to each player, maximizing the global total.
@@ -805,7 +805,7 @@ function lineupManager(mine){
   const ir=mine.filter(p=>p.slot==='IR');
   const benchRows=bench.map(p=>`<div class="row"><span>${esc(p.name)} · ${esc(p.pos)}
     ${injuryLabel(p.injuryStatus)}${rosterMatchupDetails(p)}</span>
-    ${['OUT','IR','INJURED_RESERVE','PUP','NFI'].includes(String(p.injuryStatus||'').toUpperCase())?
+    ${['OUT','IR','INJURED_RESERVE','INJURY_RESERVE','PUP','NFI'].includes(String(p.injuryStatus||'').toUpperCase())?
       `<button onclick="moveToSection(${jsAttr(p.id)},'IR')">Move to IR</button>`:''}
     ${draftData().status==='completed'?`<button onclick="dropRosterPlayer(${jsAttr(p.id)})">Drop</button>`:''}</div>`).join('');
   const irRows=ir.map(p=>`<div class="row"><span>${esc(p.name)} · ${esc(p.pos)}
@@ -913,7 +913,7 @@ function matchupPlayerCell(x){
   const name=clickable?`<button class="fa-match-player-link" onclick='openMatchupGameStats(${jsAttr(resolvedEspnId)})'>${esc(x.name)}</button>`:`<b>${esc(x.name)}</b>`;
   const {game,loaded,verified}=nflPlayerGame(x);
   const injury=String(verified?.injuryStatus||directoryPlayer?.injuryStatus||x.injuryStatus||'').toUpperCase();
-  const designation=({QUESTIONABLE:'Q',DOUBTFUL:'D',OUT:'O',INJURED_RESERVE:'IR',IR:'IR',PROBABLE:'P'})[injury]||'';
+  const designation=({QUESTIONABLE:'Q',DOUBTFUL:'D',OUT:'O',INJURED_RESERVE:'IR',INJURY_RESERVE:'IR',IR:'IR',PROBABLE:'P'})[injury]||'';
   const injuryBadge=designation?`<span class="fa-injury" title="${esc(injury)} · Latest available ESPN designation">${esc(designation)}</span>`:'';
   const opponent=game?.opponent||null;
   const kickoff=game?.kickoff&&!Number.isNaN(Date.parse(game.kickoff))?new Date(game.kickoff).toLocaleString(undefined,{weekday:'short',hour:'numeric',minute:'2-digit',timeZoneName:'short'}):null;
