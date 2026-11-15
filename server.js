@@ -2423,8 +2423,12 @@ if(process.env.ENABLE_FULL_PLAYER_DIRECTORY_SYNC==='true'){
 setInterval(activateLeagueSchedule,60000);
 setTimeout(activateLeagueSchedule,3000);
 if(process.env.ENABLE_LIVE_SCORING_SYNC!=='false')setInterval(()=>resourceJobs.run('syncNFLScoring',syncNFLScoring),60000);
-setInterval(()=>resourceJobs.run('reconcileHistoricalMatchups',reconcileHistoricalMatchups),30*60*1000);
-setTimeout(()=>resourceJobs.run('reconcileHistoricalMatchups',reconcileHistoricalMatchups),90*1000);
+// Temporarily isolate historical reconciliation from startup OOMs.
+// Re-enable only after memory profiling confirms it is safe.
+if(process.env.ENABLE_HISTORICAL_RECONCILIATION==='true'){
+  setInterval(()=>resourceJobs.run('reconcileHistoricalMatchups',reconcileHistoricalMatchups),30*60*1000);
+  setTimeout(()=>resourceJobs.run('reconcileHistoricalMatchups',reconcileHistoricalMatchups),90*1000);
+}
 setInterval(updatePostseason,60000);
 setTimeout(updatePostseason,20000);
 if(process.env.ENABLE_LIVE_SCORING_SYNC!=='false')setTimeout(()=>resourceJobs.run('syncNFLScoring',syncNFLScoring),6000);
