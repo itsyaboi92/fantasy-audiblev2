@@ -1725,7 +1725,7 @@ function faEntranceDismiss(){
 
 async function connect(){if(!token)return authForm();if(!notificationLaunch)faEntranceInit();try{const response=await fetch('/api/state',{
   headers:{Authorization:'Bearer '+token},cache:'no-store'});if(response.status===401){faEntranceDismiss();return logout();}
-  if(!response.ok)throw Error('Server unavailable');state=await response.json();manager=state.viewer.manager;render();faEntranceReady=true;if(notificationLaunch&&tab==='Locker Room')loadChat();else loadChat();}
+  if(!response.ok)throw Error('Server unavailable');state=await response.json();manager=state.viewer.manager;render();faEntranceReady=true;loadChat();}
   catch(e){faEntranceDismiss();$('connection').textContent='● Offline';return;}
   await syncServerClock();const events=new EventSource('/api/events?token='+encodeURIComponent(token));
   let previousPickCount=state.draft?.picks?.length??0,previousDeadline=state.draft?.deadline??null,
