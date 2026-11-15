@@ -2147,7 +2147,7 @@ async function notifyManager(manager,payload){
     try{await webpush.sendNotification(row.subscription,JSON.stringify(payload),{TTL:300});sent=true;}
     catch(e){if(e.statusCode===404||e.statusCode===410)
       await pool.query('DELETE FROM fantasy_audible_push WHERE endpoint=$1',[row.endpoint]);
-      else console.error('Push delivery:',e.message);}
+      else console.error('Push delivery:',JSON.stringify({statusCode:e.statusCode||null,message:e.message,body:typeof e.body==='string'?e.body.slice(0,300):null}));}
   }));return sent;
 }
 let faRosterStatusPolling=false;
