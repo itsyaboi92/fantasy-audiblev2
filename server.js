@@ -2159,7 +2159,19 @@ async function reconcileHistoricalMatchups(){
       match.warning='Verification blocked: historical lineup snapshot is missing.';
       continue;
      }
+     // A valid fixture needs both managers' recorded starters. Empty sides
+     // and duplicated player IDs cannot be certified as a completed matchup.
+     if(!home.length||!away.length){
+      match.warning='Verification blocked: one or both historical lineups are empty.';
+      continue;
+     }
      const lineup=[...home,...away];
+     const lineupIds=lineup.map(p=>String(p.id));
+     if(new Set(lineupIds).size!==lineupIds.length){
+      match.warning='Verification blocked: duplicate player IDs in historical matchup.';
+      match.snapshotIntegrityIssues=[{reason:'DUPLICATE_PLAYER_IN_MATCHUP'}];
+      continue;
+     }
      const unresolved=lineup.filter(p=>
        (p.scoringMode&&!(p.scoringMode==='later'&&s.injurySwapHistory?.some(x=>
          Number(x.week)===week&&x.mode==='later'&&String(x.replacementId)===String(p.id)&&
