@@ -42,11 +42,12 @@ function pushAuthDiagnostics(endpoint){
 }
 
 // Inspect generated VAPID JWT metadata only; never log the JWT or signing keys.
-function pushJwtDiagnostics(endpoint){
+function pushJwtDiagnostics(endpoint,subscription,payload){
   try{
     const audience=new URL(endpoint).origin;
     const subject=process.env.VAPID_SUBJECT||'mailto:admin@example.com';
-    const headers=webpush.getVapidHeaders(audience,subject,PUSH_PUBLIC_KEY,PUSH_PRIVATE_KEY,'aes128gcm');
+    const request=webpush.generateRequestDetails(subscription,JSON.stringify(payload),{TTL:300});
+    const headers=request.headers;
     const authorization=headers.Authorization||headers.authorization||'';
     const token=authorization.match(/(?:^|[ ,])t=([^, ]+)/i)?.[1]||authorization.match(/^WebPush +([^ ]+)/i)?.[1];
     if(!token)return {generated:false,authorizationScheme:authorization.split(' ')[0]||null};
@@ -58,7 +59,7 @@ function pushJwtDiagnostics(endpoint){
     const keyBytes=Buffer.from(PUSH_PUBLIC_KEY,'base64url');
     const key=crypto.createPublicKey({key:{kty:'EC',crv:'P-256',x:keyBytes.subarray(1,33).toString('base64url'),y:keyBytes.subarray(33,65).toString('base64url')},format:'jwk'});
     const signatureValid=crypto.verify('sha256',Buffer.from(parts[0]+'.'+parts[1]),{key,dsaEncoding:'ieee-p1363'},Buffer.from(parts[2],'base64url'));
-    return {generated:true,algorithm:header.alg||null,type:header.typ||null,audienceMatches:claims.aud===audience,expirationSeconds:typeof claims.exp==='number'?claims.exp-now:null,subjectScheme:typeof claims.sub==='string'?(claims.sub.startsWith('mailto:')?'mailto':claims.sub.startsWith('https://')?'https':'other'):null,signatureValid};
+    return {generated:true,algorithm:header.alg||null,type:header.typ||null,audienceMatches:claims.aud===audience,expirationSeconds:typeof claims.exp==='number'?claims.exp-now:null,subjectScheme:typeof claims.sub==='string'?(claims.sub.startsWith('mailto:')?'mailto':claims.sub.startsWith('https://')?'https':'other'):null,signatureValid,requestHost:new URL(request.endpoint).hostname,authorizationScheme:authorization.split(' ')[0],vapidKeyMatchesHeader:(authorization.match(/(?:^|[ ,])k=([^, ]+)/i)?.[1]||'')===PUSH_PUBLIC_KEY,subscriptionHasKeys:Boolean(subscription?.keys?.p256dh&&subscription?.keys?.auth)};
   }catch(e){return {generated:false,errorType:e.name||'Error'};}
 }
 
@@ -2188,7 +2189,7 @@ async function notifyManager(manager,payload){
     try{await webpush.sendNotification(row.subscription,JSON.stringify(payload),{TTL:300});sent=true;}
     catch(e){if(e.statusCode===404||e.statusCode===410)
       await pool.query('DELETE FROM fantasy_audible_push WHERE endpoint=$1',[row.endpoint]);
-      else console.error('Push delivery:',JSON.stringify({statusCode:e.statusCode||null,message:e.message,body:typeof e.body==='string'?e.body.slice(0,300):null,diagnostics:pushAuthDiagnostics(row.endpoint),jwtDiagnostics:pushJwtDiagnostics(row.endpoint)}));}
+      else console.error('Push delivery:',JSON.stringify({statusCode:e.statusCode||null,message:e.message,body:typeof e.body==='string'?e.body.slice(0,300):null,diagnostics:pushAuthDiagnostics(row.endpoint),jwtDiagnostics:pushJwtDiagnostics(row.endpoint,row.subscription,payload)}));}
   }));return sent;
 }
 let faRosterStatusPolling=false;
