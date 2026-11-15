@@ -114,3 +114,15 @@ test('schedule pairing mismatch is detected after NFL games are final',()=>{
  assert.equal(m.away,'m2');
  assert.equal(m.snapshotIntegrityIssues[0].reason,'SCHEDULE_PAIRING_MISMATCH');
 });
+
+test('live ledger never finalizes an empty manager lineup',()=>{
+ const {s,games,accounts}=setup();s.players=s.players.filter(p=>p.owner!=='m2');
+ games[0].status='final';updateWeeklyLedger(s,accounts,9,games,[]);
+ assert.equal(s.weeklyLedger[9].matchups['9-m1-m2'].status,'provisional');
+});
+test('live ledger never finalizes duplicated player IDs',()=>{
+ const {s,games,accounts}=setup();
+ s.players.push({...s.players[0],owner:'m2',slot:'RB'});
+ games[0].status='final';updateWeeklyLedger(s,accounts,9,games,[]);
+ assert.equal(s.weeklyLedger[9].matchups['9-m1-m2'].status,'provisional');
+});
