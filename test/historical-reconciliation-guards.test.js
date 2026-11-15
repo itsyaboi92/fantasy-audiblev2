@@ -20,3 +20,15 @@ test('finalization refuses unresolved integrity warnings',()=>{
  assert.match(reconcile,/if\(match\.snapshotIntegrityIssues\?\.length\)\{/);
  assert.match(reconcile,/Verification blocked: unresolved lineup snapshot integrity issues/);
 });
+
+test('historical scoring writes verified week and game provenance',()=>{
+ assert.match(reconcile,/entry\.verifiedScoreWeek=week/);
+ assert.match(reconcile,/entry\.verifiedScoreGameId=u\.game\?String\(u\.game\.id\):null/);
+ assert.match(reconcile,/entry\.verifiedScoreTeamId=u\.team\?String\(u\.team\):null/);
+});
+test('historical finalization rejects wrong week or unmatched game/team',()=>{
+ assert.match(reconcile,/Number\(p\.verifiedScoreWeek\)!==week/);
+ assert.match(reconcile,/!p\.verifiedScoreGameId/);
+ assert.match(reconcile,/String\(g\.id\)===String\(p\.verifiedScoreGameId\)/);
+ assert.match(reconcile,/String\(t\.id\)===String\(p\.verifiedScoreTeamId\)/);
+});
