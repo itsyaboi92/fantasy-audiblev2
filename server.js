@@ -1312,7 +1312,9 @@ async function api(req,res,route){
         for(const [id,live] of Object.entries(weeklyFeed.players)){
           if(!players[id])continue;
           players[id].injuryStatus=live.injuryStatus;
-          players[id].teamId=live.teamId||players[id].teamId;
+          // ESPN proTeamId=0 means NFL free agent; never treat it as a scheduled team.
+          if(live.teamId!==null&&live.teamId!==undefined)
+            players[id].teamId=String(live.teamId)==='0'?null:String(live.teamId);
           const projected=faStatProjection({stats:live.projectedStats},players[id].position,settingsOf(current.state).scoring);
           players[id].weeklyProjectedPoints=projected;
           players[id].projectionMethod=projected===null?'STAT_PROJECTION_UNAVAILABLE':(players[id].position==='K'?'LEAGUE_SCORED_ESPN_STATS_K_50PLUS_APPROX':players[id].position==='D/ST'?'LEAGUE_SCORED_ESPN_STATS_DST_TIER_APPROX':'LEAGUE_SCORED_ESPN_STATS');
@@ -1339,7 +1341,13 @@ async function api(req,res,route){
           if(rank){entry.oprk=rank.rank;entry.oprkAverageAllowed=rank.averageAllowed;entry.oprkSample=rank.sample;}
         }
       }catch(e){console.warn('Historical matchup analytics unavailable:',e.message);}
-      return send(res,200,{season,week,players,updatedAt:new Date().toISOString(),
+      const coverage={directoryPlayers:directory.players.length,
+        weeklyFeedPlayers:weeklyFeed?Object.keys(weeklyFeed.players).length:0,
+        matchedWeeklyPlayers:weeklyFeed?Object.keys(weeklyFeed.players).filter(id=>Object.hasOwn(players,id)).length:0,
+        playersWithoutTeam:Object.values(players).filter(p=>p.teamId==null||p.teamId==='0').length,
+        playersWithoutWeeklyProjection:Object.values(players).filter(p=>p.weeklyProjectedPoints===null).length,
+        weeklyFeedStale:Boolean(weeklyFeed?.stale)};
+      return send(res,200,{season,week,players,coverage,updatedAt:new Date().toISOString(),
         historicalMethod:historical?.method||'Unavailable',historicalGames:historical?.gamesProcessed||0,
         projectionStatus:weeklyFeed&&!weeklyFeed.stale?'LEAGUE_SCORED_ESPN_STATS':'UNAVAILABLE',oprkStatus:historical&&Object.keys(historical.rankings).length?'HISTORICAL_32_TEAM_RANK':'UNAVAILABLE',
         notice:'Projections use ESPN projected statistics and league scoring, never ESPN fantasy-point totals. K 50+ field goals use the 50-59 scoring tier; D/ST projected mean points/yards allowed select approximate tiers. Missing projected stats remain unavailable. OPRK is historical.'});
