@@ -561,6 +561,26 @@ async function publishLockerBot(){
     for(const edition of s.editorial||[])posts.push({key:`edition:${edition.id}`,body:botEditionText(edition)});
     for(const tx of s.transactions||[]){if(Date.parse(tx.at)<=since)continue;
       const body=botEventText(s,tx);if(body)posts.push({key:`event:${tx.id}`,body});}
+    // Verified live injury events, scoped to this league and deduplicated in PostgreSQL.
+    // Only publish newly observed ESPN status transitions, never retroactive injuries.
+    for(const injury of s.injuries||[]){
+      if(injury.source!=='ESPN'||!injury.at||Date.parse(injury.at)<=since)continue;
+      const player=s.players.find(p=>p.id===injury.player);
+      if(!player||!player.owner)continue;
+      const designation=String(injury.newDesignation||'').toUpperCase();
+      if(!injuryStatuses.has(designation))continue;
+      const manager=botSafeName(s,player.owner);
+      const name=String(player.name||'Unknown player').slice(0,80);
+      const status=designation.replaceAll('_',' ');
+      const key='injury:'+injury.id;
+      const remark=botPick(key,[
+        'The injury report just punched a hole in that lineup. The front office is officially sweating.',
+        'That is one hell of a way to ruin a Sunday. Time to earn that manager title.',
+        'The medical staff has entered the fantasy group chat. Nobody is having a good time.',
+        'The lineup was looking comfortable. Football had other plans.'
+      ]);
+      posts.push({key,body:`🚨 THE AUDIBLE | LIVE INJURY: ${name} is now ${status} per ESPN (previously ${String(injury.previousDesignation||'unknown').replaceAll('_',' ')}). ${manager} has a problem. ${remark} Injury substitution eligibility depends on league rules.`});
+    }
     // Only final scores; skip retroactive historic matchups on initial deployment.
     for(const post of botMatchupPosts(s)){
       const parts=post.key.split(':'),m=s.weeklyLedger?.[parts[1]]?.matchups?.[parts.slice(2).join(':')];
