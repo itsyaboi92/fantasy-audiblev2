@@ -87,7 +87,9 @@ function updateWeeklyLedger(s,accounts,week,games,failures){
       }
     }
     const allPlayers=[...homeLineup,...awayLineup];
-    const verified=allPlayers.every(p=>p.liveScoreStatus==='UPDATED'&&
+    const verified=homeLineup.length>0&&awayLineup.length>0&&
+      new Set(allPlayers.map(p=>String(p.id))).size===allPlayers.length&&
+      allPlayers.every(p=>p.liveScoreStatus==='UPDATED'&&
     (!p.scoringMode||p.scoringMode==='later')&&Number.isFinite(p.points));
     const status=allFinal&&verified?'final':'provisional';
     const homeScore=ledgerTotal(homeLineup),awayScore=ledgerTotal(awayLineup);
