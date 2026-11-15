@@ -1286,10 +1286,17 @@ async function api(req,res,route){
       // designation. The roster's old team ID is not authoritative after trades.
       const directory=await draftPool();
       const players={};
+      const rosterByEspnId=new Map((current.state.players||[])
+        .filter(p=>p.espnId!=null).map(p=>[String(p.espnId),p]));
+      const validStatus=value=>{
+        const status=String(value||'').trim().toUpperCase();
+        return status&&status!=='UNKNOWN'&&status!=='UNAVAILABLE'?status:null;
+      };
       for(const p of directory.players){
-        const id=String(p.id);
+        const id=String(p.id),roster=rosterByEspnId.get(id);
         players[id]={teamId:p.nflTeamId==null?null:String(p.nflTeamId),
-          injuryStatus:p.injuryStatus||'UNKNOWN',position:p.position,
+          injuryStatus:validStatus(roster?.injuryStatus)||validStatus(p.injuryStatus)||'UNKNOWN',
+          position:p.position,
           // Season projections must not masquerade as week projections.
           weeklyProjectedPoints:null};
       }
@@ -1297,7 +1304,9 @@ async function api(req,res,route){
       try{weeklyFeed=await faWeeklyESPN(season,week);
         for(const [id,live] of Object.entries(weeklyFeed.players)){
           if(!players[id])continue;
-          players[id].injuryStatus=live.injuryStatus;
+          // UNKNOWN is not a fresh medical designation. Preserve the roster's
+          // synchronized status when ESPN's weekly record lacks one.
+          players[id].injuryStatus=validStatus(live.injuryStatus)||players[id].injuryStatus;
           players[id].teamId=live.teamId||players[id].teamId;
           const projected=faStatProjection({stats:live.projectedStats},players[id].position,settingsOf(current.state).scoring);
           players[id].weeklyProjectedPoints=projected;
