@@ -580,6 +580,9 @@ async function publishLockerBot(){
     // One-time requested mention test; posted once per league via bot_events deduplication.
     if(s.managers.some(m=>[m.team,m.name].some(v=>String(v||'').toLowerCase()==='extramediumsarge')))
       posts.push({key:'requested-mention-extramediumsarge-20261115',body:'🎙️ THE AUDIBLE | SPECIAL BULLETIN: ExtraMediumSarge, congratulations. You wanted my attention, and now you have it. Your team is officially on notice. Every blown lead, every bench disaster, every questionable roster decision—I will have the receipts. Welcome to the hot seat, Sarge.'});
+    // One-time deep-link verification after notification navigation fix.
+    if(s.managers.some(m=>[m.team,m.name].some(v=>String(v||'').toLowerCase()==='extramediumsarge')))
+      posts.push({key:'requested-deeplink-test-extramediumsarge-20261115',body:'🎙️ THE AUDIBLE | LOCKER ROOM CHECK: ExtraMediumSarge, if you tapped this notification and landed directly in the Locker Room, the play worked. If you had to fight through the entrance screen again, somebody on this roster is getting benched.'});
     for(const edition of s.editorial||[])posts.push({key:`edition:${edition.id}`,body:botEditionText(edition)});
     for(const tx of s.transactions||[]){if(Date.parse(tx.at)<=since)continue;
       const body=botEventText(s,tx);if(body)posts.push({key:`event:${tx.id}`,body,mentions:tx.manager?[tx.manager]:[]});}
