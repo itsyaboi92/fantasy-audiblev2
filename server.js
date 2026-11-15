@@ -1384,7 +1384,14 @@ async function api(req,res,route){
       if(!teamId)return send(res,200,{id,season,week,status:'unavailable',notice:'No verified NFL team assignment'});
       const games=await liveNFL.loadWeek(season,week);
       const game=games.find(g=>g.teams.some(t=>String(t.id)===teamId));
-      if(!game)return send(res,200,{id,season,week,status:'bye',notice:'No NFL game scheduled for this player this week'});
+      if(!game){
+        // A missing scoreboard game is not proof of a bye; verify all 17 team games.
+        let verifiedBye=false;
+        try{verifiedBye=await liveNFL.verifyTeamBye(season,week,teamId);}
+        catch(e){console.warn('NFL bye verification unavailable:',e.message);}
+        return send(res,200,{id,season,week,status:verifiedBye?'bye':'unavailable',
+          notice:verifiedBye?'Verified NFL bye week':'NFL game missing from scoreboard; bye not verified'});
+      }
       const own=game.teams.find(t=>String(t.id)===teamId),opponent=game.teams.find(t=>String(t.id)!==teamId);
       const result={id,season,week,player:{name:athlete.name,position:athlete.position,team:own?.abbreviation},
         game:{id:game.id,status:game.status,kickoff:game.kickoff,team:own?.abbreviation,opponent:opponent?.abbreviation,
