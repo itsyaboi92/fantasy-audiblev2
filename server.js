@@ -2158,21 +2158,36 @@ async function faSyncRosterStatuses(){
     const season=Number(process.env.ESPN_SEASON||2026);
     const week=Number(state.nflDirectorySync?.currentWeek||state.week||1);
     const data=await faWeeklyESPN(season,week);
+    const coverage={season,week,feedPlayers:Object.keys(data.players).length,rostered:0,matched:0,missing:0,unknown:0,updated:0,unchanged:0,watched:[]};
     await change(s=>{
       s.injuryObservations ||= {};
       for(const p of s.players){if(!p.espnId)continue;
-        const current=data.players[String(p.espnId)];if(!current)continue;
+        coverage.rostered++;
+        const current=data.players[String(p.espnId)];
+        const watched=/puka|nacua/i.test(String(p.name||p.fullName||''));
+        if(!current){coverage.missing++;if(watched)coverage.watched.push({id:String(p.espnId),reason:'MISSING_FROM_WEEKLY_FEED',stored:p.injuryStatus||'UNKNOWN'});continue;}
+        coverage.matched++;
+        const incoming=String(current.injuryStatus||'UNKNOWN').trim().toUpperCase();
+        const prior=String(p.injuryStatus||'UNKNOWN').trim().toUpperCase();
+        if(incoming==='UNKNOWN'||incoming==='UNAVAILABLE'||!incoming){
+          coverage.unknown++;
+          if(watched)coverage.watched.push({id:String(p.espnId),reason:'UNKNOWN_FROM_WEEKLY_FEED',stored:prior});
+          continue;
+        }
+        if(incoming!==prior)coverage.updated++;else coverage.unchanged++;
+        if(watched)coverage.watched.push({id:String(p.espnId),reason:'MATCHED',stored:prior,incoming});
         // Roster refresh must not advance the live injury detector's observation.
         // Establish a baseline only before kickoff; the dedicated live poll owns
         // injuryObservations while games are in progress.
         const games=s.nflSync?.games||[];
         const game=games.find(g=>g.teams?.some(t=>String(t.id||t)===String(p.nflTeamId||p.proTeamId||p.teamId||'')));
         if(game?.status==='upcoming' && !Object.prototype.hasOwnProperty.call(s.injuryObservations,p.id))
-          s.injuryObservations[p.id]=String(current.injuryStatus||'UNKNOWN').toUpperCase();
-        p.injuryStatus=current.injuryStatus;
+          s.injuryObservations[p.id]=incoming;
+        p.injuryStatus=incoming;
       }
       return {ok:true};
     });
+    console.info('[roster-injury-coverage]',JSON.stringify(coverage));
   }catch(e){console.warn('All-roster injury sync:',e.message);}
   finally{faRosterStatusPolling=false;}
 }
