@@ -919,7 +919,7 @@ function matchupPlayerCell(x){
   const kickoff=game?.kickoff&&!Number.isNaN(Date.parse(game.kickoff))?new Date(game.kickoff).toLocaleString(undefined,{weekday:'short',hour:'numeric',minute:'2-digit',timeZoneName:'short'}):null;
   const nflTeam=game?.team||(/^[A-Z]{2,3}$/.test(String(x.team||''))?x.team:null);
   const gameLabel=game?`${nflTeam||''} ${game.homeAway==='home'?'vs':'@'} ${opponent||'TBD'}`:nflTeam||'NFL team unavailable';
-  const gameStatus=game?.status|| (loaded?'Bye / no game':'Schedule loading');
+  const gameStatus=game?.status||(loaded?(nflTeam?'No scheduled game · bye unverified':'Team affiliation unavailable · schedule unverified'):'Schedule loading');
   // Do not treat season-long projections as weekly projections.
   const oprk=verified?.oprk==null?NaN:Number(verified.oprk);
   const projected=verified?.weeklyProjectedPoints==null?NaN:Number(verified.weeklyProjectedPoints);
@@ -1105,7 +1105,10 @@ function matchupView(){
   const rightPlayers=recorded?.awayLineup?lineupBySlot(recorded.awayLineup.map(p=>({...p,_frozenWeek:week}))):
     (week>current?futurePreview(matchupStarters(game.away)):(isCurrent?matchupStarters(game.away):[]));
   const cells=STARTER_ORDER.map((slot,i)=>`<div class="fa-match-row"><div class="fa-player">${leftPlayers[i]?(week>current?`<b>${esc(leftPlayers[i].name)}</b><div class="muted small">Projected starter · 0.0 actual</div>`:matchupPlayerCell(leftPlayers[i])):'<span class="muted">Open slot</span>'}</div><div class="fa-position">${slot}</div><div class="fa-player fa-right">${rightPlayers[i]?(week>current?`<b>${esc(rightPlayers[i].name)}</b><div class="muted small">Projected starter · 0.0 actual</div>`:matchupPlayerCell(rightPlayers[i])):'<span class="muted">Open slot</span>'}</div></div>`).join('');
-  const status=recorded?.status==='final'?'Final':week>current?'Upcoming':week<current?'Past week · provisional':((Object.values(nflMatchupCache[(Number(state.nflDirectorySync?.season||new Date().getFullYear()))+':'+week]?.data?.teams||{}).some(g=>g.status==='playing'||g.status==='final')||[...leftPlayers,...rightPlayers].some(p=>p&&Number(matchupActualPoints(p,week))!==0))?'In progress / provisional':'Upcoming / awaiting kickoff');
+  const recordedPoints=[...leftPlayers,...rightPlayers].some(p=>p&&(Number(p.points)>0||Number(p.credited)>0));
+  const gameStarted=[...leftPlayers,...rightPlayers].some(p=>p&&['playing','final','in','post'].includes(String(nflPlayerGame(p).game?.status||p.nflGame?.status||'').toLowerCase()));
+  const scoreStarted=recordedPoints||gameStarted||Number(recorded?.homeScore)>0||Number(recorded?.awayScore)>0;
+  const status=recorded?.status==='final'?'Final':week>current?'Upcoming':week<current?'Past week · provisional':scoreStarted?'In progress / provisional':'Upcoming / awaiting kickoff';
   const total=(id,side)=>recorded?.status==='final'?fmt(Number(recorded[side+'Score'])||0):
     recorded?fmt((side==='home'?leftPlayers:rightPlayers).reduce((sum,p)=>sum+matchupActualPoints(p,week),0)):
     week>current?fmt(0):
