@@ -20,7 +20,7 @@ const POSITIONS = {
 };
 
 const REFRESH_INTERVAL = 6 * 60 * 60 * 1000;
-const CACHE_SCHEMA_VERSION = 3;
+const CACHE_SCHEMA_VERSION = 2;
 
 // ESPN statistical identifiers used for offensive scoring.
 // These are separate from ESPN's fantasy-point totals.
@@ -408,57 +408,38 @@ async function cachedESPN() {
 }
 
 async function refreshESPN() {
-  const pageSize = 500;
-  const maxPages = 20;
-  const entriesById = new Map();
-  let completed = false;
-
-  for (let page = 0; page < maxPages; page++) {
-    const filter = {
-      players: {
-        limit: pageSize,
-        offset: page * pageSize,
-        filterRanksForScoringPeriodIds: { value: [0] }
+  const filter = {
+    players: {
+      limit: 1500,
+      offset: 0,
+      filterRanksForScoringPeriodIds: {
+        value: [0]
       }
-    };
-
-    const response = await fetch(ESPN_URL, {
-      headers: {
-        Accept: 'application/json',
-        'X-Fantasy-Filter': JSON.stringify(filter)
-      },
-      signal: AbortSignal.timeout(20000)
-    });
-
-    if (!response.ok) {
-      throw new Error(`ESPN returned HTTP ${response.status} at offset ${page * pageSize}`);
     }
+  };
 
-    const payload = await response.json();
-    const entries = Array.isArray(payload)
-      ? payload
-      : Array.isArray(payload?.players) ? payload.players : null;
+  const response = await fetch(ESPN_URL, {
+    headers: {
+      Accept: 'application/json',
+      'X-Fantasy-Filter': JSON.stringify(filter)
+    },
+    signal: AbortSignal.timeout(20000)
+  });
 
-    if (!entries) {
-      throw new Error(`Unexpected ESPN directory response at offset ${page * pageSize}`);
-    }
-
-    for (const entry of entries) {
-      const id = entry?.player?.id ?? entry?.id;
-      if (id !== null && id !== undefined) entriesById.set(String(id), entry);
-    }
-
-    if (entries.length < pageSize) {
-      completed = true;
-      break;
-    }
+  if (!response.ok) {
+    throw new Error(
+      `ESPN returned HTTP ${response.status}`
+    );
   }
 
-  if (!completed) {
-    throw new Error('ESPN player directory exceeded pagination limit; refusing partial cache');
-  }
+  const payload = await response.json();
 
-  const entries = [...entriesById.values()];
+  const entries = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload.players)
+    ? payload.players
+    : [];
+
   const players = sortPlayers(
     entries.map(normalizePlayer).filter(Boolean)
   );

@@ -86,9 +86,8 @@ function faStatProjection(record,position,rules){
 function faWeeklyRecord(raw,week){
   const p=raw.player||raw;
   const records=[...(Array.isArray(p.stats)?p.stats:[]),...(Array.isArray(raw.stats)?raw.stats:[])];
-  // Match the requested scoring period; season is already scoped by the ESPN URL.
-  // Do not reject valid records because an independent environment setting differs.
-  const record=records.find(x=>Number(x.statSourceId)===1&&Number(x.scoringPeriodId)===week);
+  const record=records.find(x=>Number(x.statSourceId)===1&&Number(x.scoringPeriodId)===week&&
+    (x.seasonId==null||Number(x.seasonId)===Number(process.env.ESPN_SEASON||2026)));
   return {id:String(p.id),injuryStatus:String(p.injuryStatus||'UNKNOWN').toUpperCase(),
     teamId:p.proTeamId==null?null:String(p.proTeamId),
     projectedStats:record?.stats&&typeof record.stats==='object'?record.stats:null,
@@ -96,6 +95,8 @@ function faWeeklyRecord(raw,week){
 }
 async function faWeeklyESPN(season,week){
   const key=season+':'+week,old=faWeeklyFeedCache.get(key);
+  // Keep at most two scoring periods; discard expired periods before fetching.
+  for(const [k,v] of faWeeklyFeedCache)if(k!==key&&Date.now()-v.at>5*60000)faWeeklyFeedCache.delete(k);
   if(old&&Date.now()-old.at<5*60000)return old;
   if(faWeeklyFeedPending.has(key))return faWeeklyFeedPending.get(key);
   const job=(async()=>{
@@ -106,7 +107,9 @@ async function faWeeklyESPN(season,week){
     const raw=await res.json(),entries=Array.isArray(raw)?raw:raw.players||[];
     const players={};for(const item of entries){const entry=faWeeklyRecord(item,week);if(entry.id!=='undefined')players[entry.id]=entry;}
     if(!Object.keys(players).length)throw Error('Empty ESPN weekly feed');
-    const result={at:Date.now(),players};faWeeklyFeedCache.set(key,result);return result;
+    const result={at:Date.now(),players};faWeeklyFeedCache.set(key,result);
+    while(faWeeklyFeedCache.size>2)faWeeklyFeedCache.delete(faWeeklyFeedCache.keys().next().value);
+    return result;
   })().finally(()=>faWeeklyFeedPending.delete(key));
   faWeeklyFeedPending.set(key,job);
   try{return await job;}catch(e){if(old){console.warn('ESPN weekly feed stale:',e.message);return {...old,stale:true};}throw e;}
@@ -1270,57 +1273,6 @@ async function api(req,res,route){
     else await pool.query('DELETE FROM fantasy_audible_chat_mutes WHERE manager=$1',[target]);
     return send(res,200,{ok:true});
   }
-  // Read-only commissioner diagnostic: identify duplicate weekly fixtures or
-  // lineup snapshots without altering finalized results or league standings.
-  if(req.method==='GET'&&route==='/api/diagnostics/matchup-integrity'){
-    if(!user.commissioner)return send(res,403,{error:'Commissioner only'});
-    const issues=[],weeks=[];
-    for(const [weekKey,ledger] of Object.entries(current.state.weeklyLedger||{})){
-      const week=Number(weekKey);
-      const matches=Object.values(ledger?.matchups||{});
-      const fixtureIds=new Set(),participants=new Set(),lineupFingerprints=new Map();
-      const scheduled=current.state.frozenMatchupSchedule?.[week]||[];
-      const scheduledById=new Map(scheduled.map(f=>[String(f.id),f]));
-      for(const m of matches){
-        const fixture=scheduledById.get(String(m.id));
-        if(!fixture)issues.push({week,matchId:m.id,type:'MATCHUP_NOT_IN_FROZEN_SCHEDULE'});
-        else if(String(fixture.home)!==String(m.home)||String(fixture.away)!==String(m.away))
-          issues.push({week,matchId:m.id,type:'MATCHUP_TEAMS_DIFFER_FROM_SCHEDULE',
-            scheduled:{home:fixture.home,away:fixture.away},stored:{home:m.home,away:m.away}});
-        for(const side of ['homeLineup','awayLineup']){
-          const lineup=m[side];
-          const manager=String(m[side==='homeLineup'?'home':'away']);
-          for(const p of Array.isArray(lineup)?lineup:[]){
-            const snapshotOwner=String(p.owner??'');
-            if(snapshotOwner&&snapshotOwner!==manager)
-              issues.push({week,matchId:m.id,type:'SNAPSHOT_OWNER_MISMATCH',side,playerId:String(p.id)});
-          }
-        }
-        const pair=[String(m.home),String(m.away)].sort().join(':');
-        if(fixtureIds.has(pair))issues.push({week,matchId:m.id,type:'DUPLICATE_PAIR',pair});
-        fixtureIds.add(pair);
-        for(const manager of [m.home,m.away]){
-          if(participants.has(String(manager)))issues.push({week,matchId:m.id,type:'MANAGER_IN_MULTIPLE_MATCHUPS',manager});
-          participants.add(String(manager));
-        }
-        for(const side of ['homeLineup','awayLineup']){
-          const lineup=m[side];
-          if(!Array.isArray(lineup)){issues.push({week,matchId:m.id,type:'MISSING_LINEUP',side});continue;}
-          const ids=lineup.map(p=>String(p.id)).sort();
-          if(new Set(ids).size!==ids.length)issues.push({week,matchId:m.id,type:'DUPLICATE_PLAYER_IN_LINEUP',side});
-          const fingerprint=JSON.stringify(ids);
-          if(ids.length&&lineupFingerprints.has(fingerprint))
-            issues.push({week,matchId:m.id,type:'IDENTICAL_LINEUP_IDS',side,other:lineupFingerprints.get(fingerprint)});
-          else if(ids.length)lineupFingerprints.set(fingerprint,{matchId:m.id,side});
-        }
-      }
-      for(const fixture of scheduled)if(!matches.some(m=>String(m.id)===String(fixture.id)))
-        issues.push({week,matchId:fixture.id,type:'SCHEDULED_MATCHUP_MISSING_FROM_LEDGER'});
-      weeks.push({week,matchups:matches.length,final:matches.filter(m=>m.status==='final').length,
-        provisional:matches.filter(m=>m.status!=='final').length});
-    }
-    return send(res,200,{weeks,issues,issueCount:issues.length,readOnly:true});
-  }
   if(req.method==='GET'&&route==='/api/espn/players'){
     try{const data=await draftPool();return send(res,200,{...data,count:data.players.length});}
     catch(e){return send(res,503,{error:'ESPN player data is not available yet',details:e.message});}}
@@ -1334,12 +1286,9 @@ async function api(req,res,route){
       // designation. The roster's old team ID is not authoritative after trades.
       const directory=await draftPool();
       const players={};
-      const rosterByEspnId=new Map((current.state.players||[]).filter(p=>p.espnId!=null).map(p=>[String(p.espnId),p]));
       for(const p of directory.players){
         const id=String(p.id);
-        const roster=rosterByEspnId.get(id);
-        const fallbackTeam=p.nflTeamId??roster?.nflTeamId??roster?.proTeamId??roster?.teamId;
-        players[id]={teamId:fallbackTeam==null||String(fallbackTeam)==='0'?null:String(fallbackTeam),
+        players[id]={teamId:p.nflTeamId==null?null:String(p.nflTeamId),
           injuryStatus:p.injuryStatus||'UNKNOWN',position:p.position,
           // Season projections must not masquerade as week projections.
           weeklyProjectedPoints:null};
@@ -1349,9 +1298,7 @@ async function api(req,res,route){
         for(const [id,live] of Object.entries(weeklyFeed.players)){
           if(!players[id])continue;
           players[id].injuryStatus=live.injuryStatus;
-          // ESPN proTeamId=0 means NFL free agent; never treat it as a scheduled team.
-          if(live.teamId!==null&&live.teamId!==undefined)
-            players[id].teamId=String(live.teamId)==='0'?null:String(live.teamId);
+          players[id].teamId=live.teamId||players[id].teamId;
           const projected=faStatProjection({stats:live.projectedStats},players[id].position,settingsOf(current.state).scoring);
           players[id].weeklyProjectedPoints=projected;
           players[id].projectionMethod=projected===null?'STAT_PROJECTION_UNAVAILABLE':(players[id].position==='K'?'LEAGUE_SCORED_ESPN_STATS_K_50PLUS_APPROX':players[id].position==='D/ST'?'LEAGUE_SCORED_ESPN_STATS_DST_TIER_APPROX':'LEAGUE_SCORED_ESPN_STATS');
@@ -1378,13 +1325,7 @@ async function api(req,res,route){
           if(rank){entry.oprk=rank.rank;entry.oprkAverageAllowed=rank.averageAllowed;entry.oprkSample=rank.sample;}
         }
       }catch(e){console.warn('Historical matchup analytics unavailable:',e.message);}
-      const coverage={directoryPlayers:directory.players.length,
-        weeklyFeedPlayers:weeklyFeed?Object.keys(weeklyFeed.players).length:0,
-        matchedWeeklyPlayers:weeklyFeed?Object.keys(weeklyFeed.players).filter(id=>Object.hasOwn(players,id)).length:0,
-        playersWithoutTeam:Object.values(players).filter(p=>p.teamId==null||p.teamId==='0').length,
-        playersWithoutWeeklyProjection:Object.values(players).filter(p=>p.weeklyProjectedPoints===null).length,
-        weeklyFeedStale:Boolean(weeklyFeed?.stale)};
-      return send(res,200,{season,week,players,coverage,updatedAt:new Date().toISOString(),
+      return send(res,200,{season,week,players,updatedAt:new Date().toISOString(),
         historicalMethod:historical?.method||'Unavailable',historicalGames:historical?.gamesProcessed||0,
         projectionStatus:weeklyFeed&&!weeklyFeed.stale?'LEAGUE_SCORED_ESPN_STATS':'UNAVAILABLE',oprkStatus:historical&&Object.keys(historical.rankings).length?'HISTORICAL_32_TEAM_RANK':'UNAVAILABLE',
         notice:'Projections use ESPN projected statistics and league scoring, never ESPN fantasy-point totals. K 50+ field goals use the 50-59 scoring tier; D/ST projected mean points/yards allowed select approximate tiers. Missing projected stats remain unavailable. OPRK is historical.'});
@@ -1421,14 +1362,7 @@ async function api(req,res,route){
       if(!teamId)return send(res,200,{id,season,week,status:'unavailable',notice:'No verified NFL team assignment'});
       const games=await liveNFL.loadWeek(season,week);
       const game=games.find(g=>g.teams.some(t=>String(t.id)===teamId));
-      if(!game){
-        // A missing scoreboard game is not proof of a bye; verify all 17 team games.
-        let verifiedBye=false;
-        try{verifiedBye=await liveNFL.verifyTeamBye(season,week,teamId);}
-        catch(e){console.warn('NFL bye verification unavailable:',e.message);}
-        return send(res,200,{id,season,week,status:verifiedBye?'bye':'unavailable',
-          notice:verifiedBye?'Verified NFL bye week':'NFL game missing from scoreboard; bye not verified'});
-      }
+      if(!game)return send(res,200,{id,season,week,status:'bye',notice:'No NFL game scheduled for this player this week'});
       const own=game.teams.find(t=>String(t.id)===teamId),opponent=game.teams.find(t=>String(t.id)!==teamId);
       const result={id,season,week,player:{name:athlete.name,position:athlete.position,team:own?.abbreviation},
         game:{id:game.id,status:game.status,kickoff:game.kickoff,team:own?.abbreviation,opponent:opponent?.abbreviation,
@@ -1924,11 +1858,9 @@ async function syncNFLScoring(){
     if(!(state.frozenMatchupSchedule?.[week]||[]).length)return;
     const games=await liveNFL.loadWeek(season,week);
     const summaries=new Map(),failures=[];
-    await mapBounded(games.filter(g=>g.status!=='upcoming'),1,async g=>{
+    await mapBounded(games.filter(g=>g.status!=='upcoming'),2,async g=>{
       try{const summary=await liveNFL.fetchGame(g.id);
-        // Keep one authoritative summary only. Derived player/event collections
-        // were not used by this scoring path and multiplied peak allocations.
-        summaries.set(g.id,{summary});}
+        summaries.set(g.id,{summary,players:liveNFL.playerStats(summary),events:liveNFL.playEvents(summary)});}
       catch(e){failures.push(g.id+': '+e.message);}
     });
     for(const [gameId,box] of summaries){
@@ -2056,63 +1988,48 @@ async function reconcileHistoricalMatchups(){
    // checking independently persisted ESPN Fantasy D/ST categories.
    // D/ST-only games MUST be fetched too: defenseStore.ingest needs the final
    // box score to persist defensive stats before get() can verify the D/ST.
-   // Keep at most one large ESPN game summary alive at a time. Persist D/ST
-   // evidence first, then score that game's frozen offensive entries immediately.
-   // Never retain full play-by-play payloads across games or weeks.
-   const updates=[];
-   for(const c of candidates){
-    if(c.bye)updates.push({...c,points:0,bye:true});
-    else if(c.inactive)updates.push({...c,points:0,inactive:true});
-   }
-   const requiredGames=[...new Map(candidates.filter(c=>!c.bye&&!c.inactive&&c.game).map(c=>[String(c.game.id),c.game])).values()];
-   for(const game of requiredGames){
-    try{
-     const summary=await liveNFL.fetchGame(game.id);
-     await defenseStore.ingest(pool,season,game,summary);
-     for(const c of candidates){
-      if(c.bye||c.inactive||c.pos==='D/ST'||String(c.game?.id)!==String(game.id))continue;
-      try{
-       const result=authoritativeGameScore(summary,{id:c.id,espnId:c.athleteId,name:c.name,nflTeamId:c.team,pos:c.pos},settingsOf(state).scoring,game);
-       if(result&&result.complete&&Number.isFinite(result.points))updates.push({...c,points:result.points});
-      }catch(e){console.warn('Historical score verification:',week,c.name,e.message);}
-     }
-    }catch(e){console.warn('Historical reconciliation game:',game.id,e.message);}
+   const box=new Map();
+   for(const game of [...new Map(candidates.filter(c=>!c.bye&&!c.inactive&&c.game).map(c=>[c.game.id,c.game])).values()]){
+    try{const summary=await liveNFL.fetchGame(game.id);box.set(String(game.id),summary);await defenseStore.ingest(pool,season,game,summary);}
+    catch(e){console.warn('Historical reconciliation game:',game.id,e.message);}
    }
    try{await fantasyDST.ingestWeek(pool,defenseStore,season,week,games);}catch(e){console.warn('Historical D/ST feed:',week,e.message);}
+   const updates=[];
    for(const c of candidates){
-    if(c.bye||c.inactive||c.pos!=='D/ST')continue;
+    if(c.bye){updates.push({...c,points:0,bye:true});continue;}
+    if(c.inactive){updates.push({...c,points:0,inactive:true});continue;}
+    const summary=box.get(String(c.game.id));
+    if(c.pos!=='D/ST'&&!summary)continue;
     let result;
-    try{result=await defenseStore.get(pool,season,c.game,c.team,settingsOf(state).scoring);}
+    try{result=c.pos==='D/ST'?await defenseStore.get(pool,season,c.game,c.team,settingsOf(state).scoring):authoritativeGameScore(summary,{id:c.id,espnId:c.athleteId,name:c.name,nflTeamId:c.team,pos:c.pos},settingsOf(state).scoring,c.game);}
     catch(e){console.warn('Historical score verification:',week,c.name,e.message);continue;}
-    if(c.game.status==='final'){
-     const savedEntry=(snapshotMatches.find(m=>m.id===c.matchId)?.[c.side]||[])
-       .find(p=>String(p.id)===c.id);
-     if(result&&Number.isFinite(result.points)&&savedEntry&&
-        Number.isFinite(savedEntry.points)&&savedEntry.liveScoreStatus==='PARTIAL'){
-       updates.push({...c,points:savedEntry.points,finalDSTSnapshot:true});
-       continue;
-     }
+    if(c.pos==='D/ST'&&c.game.status==='final'){
+      // A final NFL game can preserve the already-scored, frozen D/ST total
+      // without demanding evidence for every zero-valued rare category.
+      // Never manufacture a score: require a finite existing snapshot and
+      // an actual persisted D/ST result for this same game/team.
+      const savedEntry=(snapshotMatches.find(m=>m.id===c.matchId)?.[c.side]||[])
+        .find(p=>String(p.id)===c.id);
+      if(result&&Number.isFinite(result.points)&&savedEntry&&
+         Number.isFinite(savedEntry.points)&&savedEntry.liveScoreStatus==='PARTIAL'){
+        updates.push({...c,points:savedEntry.points,finalDSTSnapshot:true});
+        continue;
+      }
     }
-    if(result&&result.complete&&Number.isFinite(result.points))updates.push({...c,points:result.points});
+    if(!result||!result.complete||!Number.isFinite(result.points))continue;
+    updates.push({...c,points:result.points});
    }
    // Always evaluate saved matchups, including cycles with zero ESPN score changes.
    await change((s,accounts)=>{
     const matches=s.weeklyLedger?.[week]?.matchups||{};
     for(const u of updates){
-     const match=matches[u.matchId];if(!match||match.status==='final')continue;
-     const scheduled=(s.frozenMatchupSchedule?.[week]||[]).find(x=>String(x.id)===String(match.id));
-     if(!scheduled||String(scheduled.home)!==String(match.home)||String(scheduled.away)!==String(match.away))continue;
+     const match=matches[u.matchId];if(!match)continue;
      const entry=(match[u.side]||[]).find(x=>String(x.id)===u.id);
      if(!entry||entry.scoringMode&&entry.scoringMode!=='later')continue;
      // Candidate selection already checked a persisted later-kickoff swap.
      // Never reconstruct or mutate a historical lineup from today's roster.
      entry.points=u.points;
      entry.liveScoreStatus=u.bye?'BYE':u.inactive?'INACTIVE':'UPDATED';
-     // Bind verified points to the specific NFL game and league week.
-     // A stale UPDATED flag alone is insufficient evidence of this week's score.
-     entry.verifiedScoreWeek=week;
-     entry.verifiedScoreGameId=u.game?String(u.game.id):null;
-     entry.verifiedScoreTeamId=u.team?String(u.team):null;
      if(u.finalDSTSnapshot){
        entry.finalScoreSource='FROZEN_DST_SNAPSHOT';
        entry.finalScoreGameId=String(u.game.id);
@@ -2131,45 +2048,18 @@ async function reconcileHistoricalMatchups(){
      const home=match.homeLineup,away=match.awayLineup;
      // Final results are immutable: do not recompute them from later data.
      if(match.status==='final')continue;
-     const scheduled=(s.frozenMatchupSchedule?.[week]||[]).find(x=>String(x.id)===String(match.id));
-     if(!scheduled||String(scheduled.home)!==String(match.home)||String(scheduled.away)!==String(match.away)){
-      match.warning='Verification blocked: saved matchup managers differ from the frozen schedule.';
-      match.snapshotIntegrityIssues=[{reason:'SCHEDULE_PAIRING_MISMATCH'}];
-      continue;
-     }
-     if(match.snapshotIntegrityIssues?.length){
-      match.warning='Verification blocked: unresolved lineup snapshot integrity issues.';
-      continue;
-     }
      if(!Array.isArray(home)||!Array.isArray(away)){
       match.warning='Verification blocked: historical lineup snapshot is missing.';
       continue;
      }
-     // A valid fixture needs both managers' recorded starters. Empty sides
-     // and duplicated player IDs cannot be certified as a completed matchup.
-     if(!home.length||!away.length){
-      match.warning='Verification blocked: one or both historical lineups are empty.';
-      continue;
-     }
      const lineup=[...home,...away];
-     const lineupIds=lineup.map(p=>String(p.id));
-     if(new Set(lineupIds).size!==lineupIds.length){
-      match.warning='Verification blocked: duplicate player IDs in historical matchup.';
-      match.snapshotIntegrityIssues=[{reason:'DUPLICATE_PLAYER_IN_MATCHUP'}];
-      continue;
-     }
      const unresolved=lineup.filter(p=>
        (p.scoringMode&&!(p.scoringMode==='later'&&s.injurySwapHistory?.some(x=>
          Number(x.week)===week&&x.mode==='later'&&String(x.replacementId)===String(p.id)&&
          String(x.manager)===String(match[home.includes(p)?'home':'away'])))) ||
        !(p.liveScoreStatus==='UPDATED'||p.liveScoreStatus==='BYE'&&p.byeVerified===true&&p.points===0||
        p.liveScoreStatus==='INACTIVE'&&p.inactiveVerified===true&&p.points===0) ||
-       !Number.isFinite(p.points) ||
-       Number(p.verifiedScoreWeek)!==week ||
-       (p.liveScoreStatus==='UPDATED'&&
-        (!p.verifiedScoreGameId||
-         !games.some(g=>String(g.id)===String(p.verifiedScoreGameId)&&
-           g.teams.some(t=>String(t.id)===String(p.verifiedScoreTeamId))))));
+       !Number.isFinite(p.points));
      if(!weekGamesFinal){
       match.warning='Verification blocked: NFL games are not all final.';
      }else if(!lineup.length){
@@ -2395,38 +2285,25 @@ setTimeout(publishLockerBot,35000);
 setTimeout(publishEditorial,25000);
 setInterval(remindPendingInjuries,60000);
 setInterval(pollLiveInjuries,30000);
-// Temporarily disable the memory-intensive full ESPN roster feed on small instances.
-// Re-enable explicitly after implementing bounded streaming/pagination memory usage.
-if(process.env.ENABLE_FULL_ROSTER_STATUS_SYNC==='true'){
-  setInterval(()=>resourceJobs.run('faSyncRosterStatuses',faSyncRosterStatuses),5*60000);
-  setTimeout(()=>resourceJobs.run('faSyncRosterStatuses',faSyncRosterStatuses),12000);
-}
+setInterval(()=>resourceJobs.run('faSyncRosterStatuses',faSyncRosterStatuses),5*60000);
+setTimeout(()=>resourceJobs.run('faSyncRosterStatuses',faSyncRosterStatuses),12000);
 setTimeout(pollLiveInjuries,18000);
-if(process.env.ENABLE_FULL_PLAYER_DIRECTORY_SYNC==='true'){
-  setInterval(()=>resourceJobs.run('syncPlayerDirectory',syncPlayerDirectory),15*60*1000);
-  setTimeout(()=>resourceJobs.run('syncPlayerDirectory',syncPlayerDirectory),12000);
-}
+setInterval(()=>resourceJobs.run('syncPlayerDirectory',syncPlayerDirectory),15*60*1000);
+setTimeout(()=>resourceJobs.run('syncPlayerDirectory',syncPlayerDirectory),12000);
 setInterval(activateLeagueSchedule,60000);
 setTimeout(activateLeagueSchedule,3000);
-if(process.env.ENABLE_LIVE_SCORING_SYNC!=='false')setInterval(()=>resourceJobs.run('syncNFLScoring',syncNFLScoring),60000);
+setInterval(()=>resourceJobs.run('syncNFLScoring',syncNFLScoring),60000);
 setInterval(()=>resourceJobs.run('reconcileHistoricalMatchups',reconcileHistoricalMatchups),30*60*1000);
 setTimeout(()=>resourceJobs.run('reconcileHistoricalMatchups',reconcileHistoricalMatchups),90*1000);
 setInterval(updatePostseason,60000);
 setTimeout(updatePostseason,20000);
-if(process.env.ENABLE_LIVE_SCORING_SYNC!=='false')setTimeout(()=>resourceJobs.run('syncNFLScoring',syncNFLScoring),6000);
+setTimeout(()=>resourceJobs.run('syncNFLScoring',syncNFLScoring),6000);
 let checkingWaivers=false;setInterval(async()=>{if(checkingWaivers)return;checkingWaivers=true;
   try{await processWaivers();}catch(e){console.error('Waiver processing:',e.message);}finally{checkingWaivers=false;}},30000);
 let checkingTimer=false;setInterval(async()=>{if(checkingTimer)return;checkingTimer=true;
   try{await processAutomaticTurn();}catch(e){console.error('Draft timer error:',e);}finally{checkingTimer=false;}},1000);
 setInterval(()=>processTradeDeadlines().catch(e=>console.warn('Trade deadline:',e.message)),60000).unref();
 // Lightweight, periodic process-level telemetry; does not retain heap snapshots.
-// Monitor memory independently of resourceJobs: other timers and HTTP handlers also allocate.
-const memoryProbe=setInterval(()=>{
-  const m=process.memoryUsage();
-  const mb=n=>Math.round(n/1048576);
-  console.info('[process-memory]',JSON.stringify({rssMB:mb(m.rss),heapUsedMB:mb(m.heapUsed),heapTotalMB:mb(m.heapTotal),externalMB:mb(m.external),arrayBuffersMB:mb(m.arrayBuffers),uptimeSec:Math.round(process.uptime())}));
-},10000);
-memoryProbe.unref();
 const memoryReport=setInterval(()=>console.info('[memory-health]',JSON.stringify(resourceJobs.status())),60000);
 memoryReport.unref();
 init().then(()=>server.listen(PORT,()=>console.log('Fantasy Audible running on '+PORT)))

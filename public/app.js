@@ -885,9 +885,8 @@ function matchupActualPoints(p,week){
   if(!p)return 0;
   // A frozen historical entry is already scoped to its ledger week.
   if(p._frozenWeek===week){
-    // Historical ledger scores are authoritative for their recorded week.
-    // Live schedule cache can be absent, stale, or report a future kickoff.
-    return Number(p.points)||0;
+    const game=nflPlayerGame(p).game;
+    return game?.status==='upcoming'?0:Number(p.points)||0;
   }
   if(Number(p.scoreWeek)!==Number(week))return 0;
   const game=nflPlayerGame(p).game;
@@ -920,7 +919,7 @@ function matchupPlayerCell(x){
   const kickoff=game?.kickoff&&!Number.isNaN(Date.parse(game.kickoff))?new Date(game.kickoff).toLocaleString(undefined,{weekday:'short',hour:'numeric',minute:'2-digit',timeZoneName:'short'}):null;
   const nflTeam=game?.team||(/^[A-Z]{2,3}$/.test(String(x.team||''))?x.team:null);
   const gameLabel=game?`${nflTeam||''} ${game.homeAway==='home'?'vs':'@'} ${opponent||'TBD'}`:nflTeam||'NFL team unavailable';
-  const gameStatus=game?.status||(loaded?(nflTeam?'No scheduled game · bye unverified':'Team affiliation unavailable · schedule unverified'):'Schedule loading');
+  const gameStatus=game?.status|| (loaded?'Bye / no game':'Schedule loading');
   // Do not treat season-long projections as weekly projections.
   const oprk=verified?.oprk==null?NaN:Number(verified.oprk);
   const projected=verified?.weeklyProjectedPoints==null?NaN:Number(verified.weeklyProjectedPoints);
@@ -1097,41 +1096,18 @@ function matchupView(){
   const byeTeams=state.managers.filter(x=>x.claimed&&!games.some(g=>g.home===x.id||g.away===x.id));
   const current=Number(state.nflDirectorySync?.currentWeek||state.week||1),isCurrent=week===current;
   const recorded=state.weeklyLedger?.[week]?.matchups?.[game.id];
-  const lineupBySlot=rows=>{
-    const used=new Set();
-    const ordered=STARTER_ORDER.map(slot=>{
-      const p=(rows||[]).find(x=>!used.has(x.id)&&(x.slot===slot||(slot==='FLEX'&&['RB','WR','TE'].includes(x.slot))));
-      if(p)used.add(p.id);
-      return p||null;
-    });
-    // Preserve visibility of saved historical scoring entries even when a
-    // substituted player no longer fits the current starter-slot layout.
-    const extras=(rows||[]).filter(p=>!used.has(p.id));
-    return {ordered,extras};
-  };
+  const lineupBySlot=rows=>{const used=new Set();return STARTER_ORDER.map(slot=>{const p=(rows||[]).find(x=>!used.has(x.id)&&(x.slot===slot||(slot==='FLEX'&&['RB','WR','TE'].includes(x.slot))));if(p)used.add(p.id);return p||null;});};
   // Future weeks have no recorded lineup yet. Preview today's roster without
   // carrying current-week fantasy points into the future matchup.
   const futurePreview=players=>players.map(p=>({...p,points:0,credited:0,scoreAtSwap:0,scoringMode:null}));
-  const leftSaved=recorded?.homeLineup?lineupBySlot(recorded.homeLineup.map(p=>({...p,_frozenWeek:week}))):null;
-  const rightSaved=recorded?.awayLineup?lineupBySlot(recorded.awayLineup.map(p=>({...p,_frozenWeek:week}))):null;
-  const leftPlayers=leftSaved?.ordered||
+  const leftPlayers=recorded?.homeLineup?lineupBySlot(recorded.homeLineup.map(p=>({...p,_frozenWeek:week}))):
     (week>current?futurePreview(matchupStarters(game.home)):(isCurrent?matchupStarters(game.home):[]));
-  const rightPlayers=rightSaved?.ordered||
+  const rightPlayers=recorded?.awayLineup?lineupBySlot(recorded.awayLineup.map(p=>({...p,_frozenWeek:week}))):
     (week>current?futurePreview(matchupStarters(game.away)):(isCurrent?matchupStarters(game.away):[]));
   const cells=STARTER_ORDER.map((slot,i)=>`<div class="fa-match-row"><div class="fa-player">${leftPlayers[i]?(week>current?`<b>${esc(leftPlayers[i].name)}</b><div class="muted small">Projected starter · 0.0 actual</div>`:matchupPlayerCell(leftPlayers[i])):'<span class="muted">Open slot</span>'}</div><div class="fa-position">${slot}</div><div class="fa-player fa-right">${rightPlayers[i]?(week>current?`<b>${esc(rightPlayers[i].name)}</b><div class="muted small">Projected starter · 0.0 actual</div>`:matchupPlayerCell(rightPlayers[i])):'<span class="muted">Open slot</span>'}</div></div>`).join('');
-  const extraRows=[...(leftSaved?.extras||[]).map(p=>({side:'home',player:p})),
-    ...(rightSaved?.extras||[]).map(p=>({side:'away',player:p}))];
-  const extraHtml=extraRows.length?'<div class="muted small" style="padding:12px 6px">Additional saved lineup entries (not assigned to a standard starter slot)</div>'+
-    extraRows.map(({side,player})=>'<div class="fa-match-row"><div class="fa-player">'+(side==='home'?matchupPlayerCell(player):'')+
-      '</div><div class="fa-position">Saved</div><div class="fa-player fa-right">'+
-      (side==='away'?matchupPlayerCell(player):'')+'</div></div>').join(''):'';
-  const recordedPoints=[...leftPlayers,...rightPlayers].some(p=>p&&(Number(p.points)>0||Number(p.credited)>0));
-  const gameStarted=[...leftPlayers,...rightPlayers].some(p=>p&&['playing','final','in','post'].includes(String(nflPlayerGame(p).game?.status||p.nflGame?.status||'').toLowerCase()));
-  const scoreStarted=recordedPoints||gameStarted||Number(recorded?.homeScore)>0||Number(recorded?.awayScore)>0;
-  const status=recorded?.status==='final'?'Final':week>current?'Upcoming':week<current?'Past week · provisional':scoreStarted?'In progress / provisional':'Upcoming / awaiting kickoff';
-  // Ledger totals include every credited player, even if a slot-display
-  // normalization omits an entry (for example during injury substitutions).
-  const total=(id,side)=>recorded?fmt(Number(recorded[side+'Score'])||0):
+  const status=recorded?.status==='final'?'Final':week>current?'Upcoming':week<current?'Past week · provisional':(Object.values(nflMatchupCache[(Number(state.nflDirectorySync?.season||new Date().getFullYear()))+':'+week]?.data?.teams||{}).some(g=>g.status==='playing')?'Live / provisional':'Upcoming / awaiting kickoff');
+  const total=(id,side)=>recorded?.status==='final'?fmt(Number(recorded[side+'Score'])||0):
+    recorded?fmt((side==='home'?leftPlayers:rightPlayers).reduce((sum,p)=>sum+matchupActualPoints(p,week),0)):
     week>current?fmt(0):
     isCurrent?fmt(matchupStarters(id).reduce((sum,p)=>sum+matchupActualPoints(p,week),0)):fmt(0);
   // Do not use current-week scores or a different week's projections for a
@@ -1165,7 +1141,7 @@ function matchupView(){
     <div class="fa-head"><div>${teamPhoto(game.home,54)}<br><b>${esc(left?.team||'Team')}</b><div class="fa-total">${total(game.home,'home')}</div></div><span>VS</span><div>${teamPhoto(game.away,54)}<br><b>${esc(right?.team||'Team')}</b><div class="fa-total">${total(game.away,'away')}</div></div></div>
     <div class="fa-match-meta muted small">${esc(status)} · ${recorded?.status==='final'?'Verified final':'Scores remain provisional until verified'}</div>
     ${forecast}
-    ${cells}${extraHtml}<p class="muted small" style="text-align:center">Swipe left/right for other matchups · Scroll down for players</p>
+    ${cells}<p class="muted small" style="text-align:center">Swipe left/right for other matchups · Scroll down for players</p>
   </section>${byeTeams.length?card('This week’s bye',byeTeams.map(x=>esc(x.team||x.id)).join(', ')):''}
   <section class="card"><h3>League standings · verified finals only</h3><div style="overflow-x:auto"><table style="width:100%;text-align:left"><thead><tr><th>Team</th><th>W</th><th>L</th><th>T</th><th>PF</th></tr></thead><tbody>${(state.standings||[]).map(r=>`<tr><td>${esc(m(r.manager)?.team||r.manager)}</td><td>${r.wins}</td><td>${r.losses}</td><td>${r.ties}</td><td>${fmt(r.pointsFor)}</td></tr>`).join('')}</tbody></table></div></section>`;
 }

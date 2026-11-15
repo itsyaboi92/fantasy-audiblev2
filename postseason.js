@@ -2,19 +2,13 @@
 // Postseason state is independent of the regular-season standings ledger.
 const endWeek=n=>n<=8?14:13;
 const qualifiers=n=>n<=8?4:6;
-function validFinalFixture(s,week,match){
- if(!match||match.status!=='final'||match.snapshotIntegrityIssues?.length||
-    !Number.isFinite(match.homeScore)||!Number.isFinite(match.awayScore))return false;
- const fixture=(s.frozenMatchupSchedule?.[week]||[]).find(f=>String(f.id)===String(match.id));
- return !!fixture&&String(fixture.home)===String(match.home)&&String(fixture.away)===String(match.away);
-}
 const pairs=(ids,week,kind)=>ids.reduce((a,_,i)=>{if(i%2===0&&ids[i+1])a.push({id:`post-${week}-${kind}-${i/2}`,home:ids[i],away:ids[i+1],kind});return a;},[]);
 function ranks(s,accounts){
  const ids=new Set(accounts.map(a=>a.manager));
  const rows=Object.fromEntries(s.managers.filter(m=>ids.has(m.id)).map(m=>[m.id,{id:m.id,w:0,l:0,t:0,pf:0,pa:0}]));
  const end=endWeek(Object.keys(rows).length);
  for(let w=1;w<=end;w++)for(const x of Object.values(s.weeklyLedger?.[w]?.matchups||{})){
-  if(!validFinalFixture(s,w,x)||!rows[x.home]||!rows[x.away])continue;
+  if(x.status!=='final'||!rows[x.home]||!rows[x.away])continue;
   const a=rows[x.home],b=rows[x.away];a.pf+=x.homeScore;b.pf+=x.awayScore;a.pa+=x.awayScore;b.pa+=x.homeScore;
   if(x.homeScore===x.awayScore){a.t++;b.t++;}else if(x.homeScore>x.awayScore){a.w++;b.l++;}else{a.l++;b.w++;}
  }
@@ -24,9 +18,9 @@ function weekFinal(s,week,verifiedNFLWeek){
  if(!verifiedNFLWeek)return false;
  const matches=s.frozenMatchupSchedule?.[week]||[];
  if(!matches.length)return false;
- return matches.every(m=>validFinalFixture(s,week,s.weeklyLedger?.[week]?.matchups?.[m.id]));
+ return matches.every(m=>s.weeklyLedger?.[week]?.matchups?.[m.id]?.status==='final');
 }
-function score(s,week,id){const m=s.weeklyLedger?.[week]?.matchups?.[id];return validFinalFixture(s,week,m)?m:null;}
+function score(s,week,id){const m=s.weeklyLedger?.[week]?.matchups?.[id];return m&&m.status==='final'?m:null;}
 function winner(m,seed){if(!m)return null;if(m.homeScore!==m.awayScore)return m.homeScore>m.awayScore?m.home:m.away;
  return seed.indexOf(m.home)<seed.indexOf(m.away)?m.home:m.away;}
 function losers(matches,seed){return matches.map(m=>{const w=winner(m,seed);return w===m.home?m.away:m.home;});}
