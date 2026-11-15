@@ -24,7 +24,6 @@ function updateWeeklyLedger(s,accounts,week,games,failures){
     // roster. Historical reconciliation updates the saved entries directly.
     // A previously captured lineup is the authority once games finish.
     // Never finalize an unverified snapshot merely because the NFL slate ended.
-    if(prior&&allFinal)continue;
     // Matchup IDs are keys, not proof of ownership. Never reuse a saved
     // snapshot for a different pairing if the frozen schedule has changed.
     if(prior&&(String(prior.home)!==String(match.home)||String(prior.away)!==String(match.away))){
@@ -33,6 +32,7 @@ function updateWeeklyLedger(s,accounts,week,games,failures){
       prior.updatedAt=new Date().toISOString();
       continue;
     }
+    if(prior&&allFinal)continue;
     const homeLineup=ledgerLineup(s,match.home,week),awayLineup=ledgerLineup(s,match.away,week);
     // Never silently replace a previously captured starter after that player's
     // NFL kickoff. Legitimate injury swaps are retained when the swap history
