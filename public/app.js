@@ -885,8 +885,9 @@ function matchupActualPoints(p,week){
   if(!p)return 0;
   // A frozen historical entry is already scoped to its ledger week.
   if(p._frozenWeek===week){
-    const game=nflPlayerGame(p).game;
-    return game?.status==='upcoming'?0:Number(p.points)||0;
+    // Historical ledger scores are authoritative for their recorded week.
+    // Live schedule cache can be absent, stale, or report a future kickoff.
+    return Number(p.points)||0;
   }
   if(Number(p.scoreWeek)!==Number(week))return 0;
   const game=nflPlayerGame(p).game;
