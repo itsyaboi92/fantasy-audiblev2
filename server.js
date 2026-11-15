@@ -2164,7 +2164,7 @@ async function faSyncRosterStatuses(){
       for(const p of s.players){if(!p.espnId)continue;
         coverage.rostered++;
         const current=data.players[String(p.espnId)];
-        const watched=/\\bpuka\\b|\\bnacua\\b/i.test(String(p.name||p.fullName||''));
+        const watched=/puka|nacua/i.test(String(p.name||p.fullName||''));
         if(!current){coverage.missing++;if(watched)coverage.watched.push({id:String(p.espnId),reason:'MISSING_FROM_WEEKLY_FEED',stored:p.injuryStatus||'UNKNOWN'});continue;}
         coverage.matched++;
         const incoming=String(current.injuryStatus||'UNKNOWN').trim().toUpperCase();
