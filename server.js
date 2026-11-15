@@ -1287,6 +1287,39 @@ async function api(req,res,route){
     else await pool.query('DELETE FROM fantasy_audible_chat_mutes WHERE manager=$1',[target]);
     return send(res,200,{ok:true});
   }
+  // Read-only commissioner diagnostic: identify duplicate weekly fixtures or
+  // lineup snapshots without altering finalized results or league standings.
+  if(req.method==='GET'&&route==='/api/diagnostics/matchup-integrity'){
+    if(!user.commissioner)return send(res,403,{error:'Commissioner only'});
+    const issues=[],weeks=[];
+    for(const [weekKey,ledger] of Object.entries(current.state.weeklyLedger||{})){
+      const week=Number(weekKey);
+      const matches=Object.values(ledger?.matchups||{});
+      const fixtureIds=new Set(),participants=new Set(),lineupFingerprints=new Map();
+      for(const m of matches){
+        const pair=[String(m.home),String(m.away)].sort().join(':');
+        if(fixtureIds.has(pair))issues.push({week,matchId:m.id,type:'DUPLICATE_PAIR',pair});
+        fixtureIds.add(pair);
+        for(const manager of [m.home,m.away]){
+          if(participants.has(String(manager)))issues.push({week,matchId:m.id,type:'MANAGER_IN_MULTIPLE_MATCHUPS',manager});
+          participants.add(String(manager));
+        }
+        for(const side of ['homeLineup','awayLineup']){
+          const lineup=m[side];
+          if(!Array.isArray(lineup)){issues.push({week,matchId:m.id,type:'MISSING_LINEUP',side});continue;}
+          const ids=lineup.map(p=>String(p.id)).sort();
+          if(new Set(ids).size!==ids.length)issues.push({week,matchId:m.id,type:'DUPLICATE_PLAYER_IN_LINEUP',side});
+          const fingerprint=JSON.stringify(ids);
+          if(ids.length&&lineupFingerprints.has(fingerprint))
+            issues.push({week,matchId:m.id,type:'IDENTICAL_LINEUP_IDS',side,other:lineupFingerprints.get(fingerprint)});
+          else if(ids.length)lineupFingerprints.set(fingerprint,{matchId:m.id,side});
+        }
+      }
+      weeks.push({week,matchups:matches.length,final:matches.filter(m=>m.status==='final').length,
+        provisional:matches.filter(m=>m.status!=='final').length});
+    }
+    return send(res,200,{weeks,issues,issueCount:issues.length,readOnly:true});
+  }
   if(req.method==='GET'&&route==='/api/espn/players'){
     try{const data=await draftPool();return send(res,200,{...data,count:data.players.length});}
     catch(e){return send(res,503,{error:'ESPN player data is not available yet',details:e.message});}}
