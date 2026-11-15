@@ -547,6 +547,25 @@ function botEditionText(edition){
 const audibleCommentary=require('./audible-commentary');
 const botEventText=audibleCommentary.eventText;
 const botMatchupPosts=audibleCommentary.finalPosts;
+// Match explicit full team names and registered manager display names only.
+// Boundary checks prevent short names from matching unrelated words.
+function audibleMentionIds(s,body){
+  const found=new Set(),text=String(body||'').toLocaleLowerCase();
+  const names=new Map((s.managers||[]).map(m=>[m.id,new Set([m.team,m.name].filter(Boolean))]));
+  for(const [id,variants] of names){
+    for(const variant of variants){
+      const needle=String(variant).trim().toLocaleLowerCase();
+      if(needle.length<3)continue;
+      let offset=0;
+      while((offset=text.indexOf(needle,offset))!==-1){
+        const before=offset?text[offset-1]:'',after=text[offset+needle.length]||'';
+        if(!/[\\p{L}\\p{N}_]/u.test(before)&&!/[\\p{L}\\p{N}_]/u.test(after)){found.add(id);break;}
+        offset+=needle.length;
+      }
+    }
+  }
+  return [...found];
+}
 let botBusy=false;
 async function publishLockerBot(){
   if(botBusy)return;botBusy=true;
@@ -595,14 +614,14 @@ async function publishLockerBot(){
           ON CONFLICT DO NOTHING RETURNING event_key)
           INSERT INTO fantasy_audible_chat(league_id,manager,body)
           SELECT $1,$3,$4 FROM inserted RETURNING id`,[leagueId,post.key,BOT_MANAGER,post.body.slice(0,1000)]);
-        if(inserted.rowCount&&post.mentions?.length)delivered.push(post);
+        if(inserted.rowCount)delivered.push(post);
       }
       await client.query('UPDATE fantasy_audible_bot_cursor SET last_at=NOW() WHERE league_id=$1',[leagueId]);
       await client.query('COMMIT');
     }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
     // Only notify after the post has committed; no duplicate or speculative mentions.
     for(const post of delivered){
-      for(const managerId of new Set(post.mentions)){
+      for(const managerId of new Set([...(post.mentions||[]),...audibleMentionIds(s,post.body)])){
         if(!s.managers.some(m=>m.id===managerId))continue;
         try{await notifyManager(managerId,{title:'🎙️ The Audible mentioned your team',body:post.body.slice(0,180),url:'/?tab=Locker%20Room'});}
         catch(e){console.warn('Audible mention push:',e.message);}
