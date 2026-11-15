@@ -1110,8 +1110,9 @@ function matchupView(){
   const gameStarted=[...leftPlayers,...rightPlayers].some(p=>p&&['playing','final','in','post'].includes(String(nflPlayerGame(p).game?.status||p.nflGame?.status||'').toLowerCase()));
   const scoreStarted=recordedPoints||gameStarted||Number(recorded?.homeScore)>0||Number(recorded?.awayScore)>0;
   const status=recorded?.status==='final'?'Final':week>current?'Upcoming':week<current?'Past week · provisional':scoreStarted?'In progress / provisional':'Upcoming / awaiting kickoff';
-  const total=(id,side)=>recorded?.status==='final'?fmt(Number(recorded[side+'Score'])||0):
-    recorded?fmt((side==='home'?leftPlayers:rightPlayers).reduce((sum,p)=>sum+matchupActualPoints(p,week),0)):
+  // Ledger totals include every credited player, even if a slot-display
+  // normalization omits an entry (for example during injury substitutions).
+  const total=(id,side)=>recorded?fmt(Number(recorded[side+'Score'])||0):
     week>current?fmt(0):
     isCurrent?fmt(matchupStarters(id).reduce((sum,p)=>sum+matchupActualPoints(p,week),0)):fmt(0);
   // Do not use current-week scores or a different week's projections for a
