@@ -577,6 +577,9 @@ async function publishLockerBot(){
     const cursor=await pool.query('SELECT last_at FROM fantasy_audible_bot_cursor WHERE league_id=$1',[leagueId]);
     const since=Date.parse(cursor.rows[0].last_at);
     const posts=[];
+    // One-time requested mention test; posted once per league via bot_events deduplication.
+    if(s.managers.some(m=>[m.team,m.name].some(v=>String(v||'').toLowerCase()==='extramediumsarge')))
+      posts.push({key:'requested-mention-extramediumsarge-20261115',body:'🎙️ THE AUDIBLE | SPECIAL BULLETIN: ExtraMediumSarge, congratulations. You wanted my attention, and now you have it. Your team is officially on notice. Every blown lead, every bench disaster, every questionable roster decision—I will have the receipts. Welcome to the hot seat, Sarge.'});
     for(const edition of s.editorial||[])posts.push({key:`edition:${edition.id}`,body:botEditionText(edition)});
     for(const tx of s.transactions||[]){if(Date.parse(tx.at)<=since)continue;
       const body=botEventText(s,tx);if(body)posts.push({key:`event:${tx.id}`,body,mentions:tx.manager?[tx.manager]:[]});}
