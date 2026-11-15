@@ -32,3 +32,11 @@ test('historical finalization rejects wrong week or unmatched game/team',()=>{
  assert.match(reconcile,/String\(g\.id\)===String\(p\.verifiedScoreGameId\)/);
  assert.match(reconcile,/String\(t\.id\)===String\(p\.verifiedScoreTeamId\)/);
 });
+
+test('historical finalization requires a nonempty lineup on both sides',()=>{
+ assert.match(reconcile,/if\(!home\.length\|\|!away\.length\)/);
+});
+test('historical finalization refuses duplicate player IDs across teams',()=>{
+ assert.match(reconcile,/new Set\(lineupIds\)\.size!==lineupIds\.length/);
+ assert.match(reconcile,/DUPLICATE_PLAYER_IN_MATCHUP/);
+});
