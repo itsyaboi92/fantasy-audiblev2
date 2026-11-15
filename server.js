@@ -48,7 +48,7 @@ function pushJwtDiagnostics(endpoint){
     const subject=process.env.VAPID_SUBJECT||'mailto:admin@example.com';
     const headers=webpush.getVapidHeaders(audience,subject,PUSH_PUBLIC_KEY,PUSH_PRIVATE_KEY,'aes128gcm');
     const authorization=headers.Authorization||headers.authorization||'';
-    const token=authorization.match(/(?:^|\\s)t=([^,\\s]+)/)?.[1]||authorization.match(/^WebPush\\s+([^\\s]+)/i)?.[1];
+    const token=authorization.match(/(?:^|[ ,])t=([^, ]+)/i)?.[1]||authorization.match(/^WebPush +([^ ]+)/i)?.[1];
     if(!token)return {generated:false,authorizationScheme:authorization.split(' ')[0]||null};
     const parts=token.split('.');
     if(parts.length!==3)return {generated:true,segments:parts.length};
