@@ -543,36 +543,10 @@ function botEditionText(edition){
   const first=(edition.lines||[]).slice(0,3).join('\n');
   return `${intro[edition.kind]||'🎙️ THE AUDIBLE'}\n${edition.title}\n${first}${edition.lines.length>3?'\nFull breakdown is on Home.':''}`.slice(0,1000);
 }
-function botEventText(s,event){
-  const manager=botSafeName(s,event.manager),details=String(event.details||'').slice(0,180);
-  switch(event.type){
-    case 'DRAFT_COMPLETE':return '🎙️ THE AUDIBLE: The draft is over. Every manager thinks they built a dynasty. At least one of them built a cautionary tale.';
-    case 'AUTO_PICK':return `🤖 THE AUDIBLE: ${manager} let autopick take the wheel. ${botPick(event.id,['Bold strategy. Let’s see if the algorithm can also coach.','The computer made the pick. The manager will still take credit.'])}`;
-    case 'SUBSTITUTION':return `🚑 THE AUDIBLE: ${manager} made an injury substitution. ${botPick(event.id,['The training room is officially part of the coaching staff.','Desperation? Strategy? We will know after the points settle.'])}`;
-    case 'RENAME':return `🪧 THE AUDIBLE: ${manager} changed the team name. ${botPick(event.id,['New branding. Same pressure to win.','A fresh coat of paint does not fix a bad lineup.'])}`;
-    case 'WAIVER_AWARDED':return `📋 THE AUDIBLE: ${manager} won a waiver claim. ${botPick(event.id,['The waiver wire is where optimism goes shopping.','A roster move with playoff-level confidence.'])}`;
-    case 'FREE_AGENT_ADD':return `🛒 THE AUDIBLE: ${manager} grabbed a free agent. ${botPick(event.id,['Either a steal or a future regret.','The bargain bin just got a headline.'])}`;
-    default:return null;
-  }
-}
-function botMatchupPosts(s){
-  const out=[];
-  for(const [week,record] of Object.entries(s.weeklyLedger||{})){
-    for(const m of Object.values(record.matchups||{})){
-      if(m.status!=='final'||!Number.isFinite(m.homeScore)||!Number.isFinite(m.awayScore))continue;
-      const margin=Math.abs(m.homeScore-m.awayScore),winner=m.homeScore===m.awayScore?null:m.homeScore>m.awayScore?m.home:m.away;
-      const loser=winner==null?null:winner===m.home?m.away:m.home;
-      const label=winner?`${botSafeName(s,winner)} over ${botSafeName(s,loser)}`:`${botSafeName(s,m.home)} and ${botSafeName(s,m.away)} tied`;
-      let remark;
-      if(!winner)remark='Nobody won. Somehow both teams still have to live with it.';
-      else if(margin>=40)remark=botPick(m.id,['That was not a matchup. That was a public demonstration.','Someone should have invoked the mercy rule.']);
-      else if(margin<=3)remark=botPick(m.id,['That finish needed a heart monitor.','One bad lineup decision away from a different headline.']);
-      else remark=botPick(m.id,['The scoreboard has spoken. The excuses are next.','A win is a win. The group chat will be unbearable.']);
-      out.push({key:`final:${week}:${m.id}`,body:`🏁 THE AUDIBLE | WEEK ${week}: ${label}, ${m.homeScore.toFixed(1)}–${m.awayScore.toFixed(1)}. ${remark}`});
-    }
-  }
-  return out;
-}
+// The Audible 2.0: commentary is isolated from scoring and transaction logic.
+const audibleCommentary=require('./audible-commentary');
+const botEventText=audibleCommentary.eventText;
+const botMatchupPosts=audibleCommentary.finalPosts;
 let botBusy=false;
 async function publishLockerBot(){
   if(botBusy)return;botBusy=true;
