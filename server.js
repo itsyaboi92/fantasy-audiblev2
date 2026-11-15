@@ -2409,11 +2409,17 @@ setTimeout(publishLockerBot,35000);
 setTimeout(publishEditorial,25000);
 setInterval(remindPendingInjuries,60000);
 setInterval(pollLiveInjuries,30000);
-setInterval(()=>resourceJobs.run('faSyncRosterStatuses',faSyncRosterStatuses),5*60000);
-setTimeout(()=>resourceJobs.run('faSyncRosterStatuses',faSyncRosterStatuses),12000);
+// Temporarily disable the memory-intensive full ESPN roster feed on small instances.
+// Re-enable explicitly after implementing bounded streaming/pagination memory usage.
+if(process.env.ENABLE_FULL_ROSTER_STATUS_SYNC==='true'){
+  setInterval(()=>resourceJobs.run('faSyncRosterStatuses',faSyncRosterStatuses),5*60000);
+  setTimeout(()=>resourceJobs.run('faSyncRosterStatuses',faSyncRosterStatuses),12000);
+}
 setTimeout(pollLiveInjuries,18000);
-setInterval(()=>resourceJobs.run('syncPlayerDirectory',syncPlayerDirectory),15*60*1000);
-setTimeout(()=>resourceJobs.run('syncPlayerDirectory',syncPlayerDirectory),12000);
+if(process.env.ENABLE_FULL_PLAYER_DIRECTORY_SYNC==='true'){
+  setInterval(()=>resourceJobs.run('syncPlayerDirectory',syncPlayerDirectory),15*60*1000);
+  setTimeout(()=>resourceJobs.run('syncPlayerDirectory',syncPlayerDirectory),12000);
+}
 setInterval(activateLeagueSchedule,60000);
 setTimeout(activateLeagueSchedule,3000);
 setInterval(()=>resourceJobs.run('syncNFLScoring',syncNFLScoring),60000);
