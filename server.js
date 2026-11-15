@@ -1990,36 +1990,44 @@ async function reconcileHistoricalMatchups(){
    // checking independently persisted ESPN Fantasy D/ST categories.
    // D/ST-only games MUST be fetched too: defenseStore.ingest needs the final
    // box score to persist defensive stats before get() can verify the D/ST.
-   const box=new Map();
-   for(const game of [...new Map(candidates.filter(c=>!c.bye&&!c.inactive&&c.game).map(c=>[c.game.id,c.game])).values()]){
-    try{const summary=await liveNFL.fetchGame(game.id);box.set(String(game.id),summary);await defenseStore.ingest(pool,season,game,summary);}
-    catch(e){console.warn('Historical reconciliation game:',game.id,e.message);}
-   }
-   try{await fantasyDST.ingestWeek(pool,defenseStore,season,week,games);}catch(e){console.warn('Historical D/ST feed:',week,e.message);}
+   // Keep at most one large ESPN game summary alive at a time. Persist D/ST
+   // evidence first, then score that game's frozen offensive entries immediately.
+   // Never retain full play-by-play payloads across games or weeks.
    const updates=[];
    for(const c of candidates){
-    if(c.bye){updates.push({...c,points:0,bye:true});continue;}
-    if(c.inactive){updates.push({...c,points:0,inactive:true});continue;}
-    const summary=box.get(String(c.game.id));
-    if(c.pos!=='D/ST'&&!summary)continue;
+    if(c.bye)updates.push({...c,points:0,bye:true});
+    else if(c.inactive)updates.push({...c,points:0,inactive:true});
+   }
+   const requiredGames=[...new Map(candidates.filter(c=>!c.bye&&!c.inactive&&c.game).map(c=>[String(c.game.id),c.game])).values()];
+   for(const game of requiredGames){
+    try{
+     const summary=await liveNFL.fetchGame(game.id);
+     await defenseStore.ingest(pool,season,game,summary);
+     for(const c of candidates){
+      if(c.bye||c.inactive||c.pos==='D/ST'||String(c.game?.id)!==String(game.id))continue;
+      try{
+       const result=authoritativeGameScore(summary,{id:c.id,espnId:c.athleteId,name:c.name,nflTeamId:c.team,pos:c.pos},settingsOf(state).scoring,game);
+       if(result&&result.complete&&Number.isFinite(result.points))updates.push({...c,points:result.points});
+      }catch(e){console.warn('Historical score verification:',week,c.name,e.message);}
+     }
+    }catch(e){console.warn('Historical reconciliation game:',game.id,e.message);}
+   }
+   try{await fantasyDST.ingestWeek(pool,defenseStore,season,week,games);}catch(e){console.warn('Historical D/ST feed:',week,e.message);}
+   for(const c of candidates){
+    if(c.bye||c.inactive||c.pos!=='D/ST')continue;
     let result;
-    try{result=c.pos==='D/ST'?await defenseStore.get(pool,season,c.game,c.team,settingsOf(state).scoring):authoritativeGameScore(summary,{id:c.id,espnId:c.athleteId,name:c.name,nflTeamId:c.team,pos:c.pos},settingsOf(state).scoring,c.game);}
+    try{result=await defenseStore.get(pool,season,c.game,c.team,settingsOf(state).scoring);}
     catch(e){console.warn('Historical score verification:',week,c.name,e.message);continue;}
-    if(c.pos==='D/ST'&&c.game.status==='final'){
-      // A final NFL game can preserve the already-scored, frozen D/ST total
-      // without demanding evidence for every zero-valued rare category.
-      // Never manufacture a score: require a finite existing snapshot and
-      // an actual persisted D/ST result for this same game/team.
-      const savedEntry=(snapshotMatches.find(m=>m.id===c.matchId)?.[c.side]||[])
-        .find(p=>String(p.id)===c.id);
-      if(result&&Number.isFinite(result.points)&&savedEntry&&
-         Number.isFinite(savedEntry.points)&&savedEntry.liveScoreStatus==='PARTIAL'){
-        updates.push({...c,points:savedEntry.points,finalDSTSnapshot:true});
-        continue;
-      }
+    if(c.game.status==='final'){
+     const savedEntry=(snapshotMatches.find(m=>m.id===c.matchId)?.[c.side]||[])
+       .find(p=>String(p.id)===c.id);
+     if(result&&Number.isFinite(result.points)&&savedEntry&&
+        Number.isFinite(savedEntry.points)&&savedEntry.liveScoreStatus==='PARTIAL'){
+       updates.push({...c,points:savedEntry.points,finalDSTSnapshot:true});
+       continue;
+     }
     }
-    if(!result||!result.complete||!Number.isFinite(result.points))continue;
-    updates.push({...c,points:result.points});
+    if(result&&result.complete&&Number.isFinite(result.points))updates.push({...c,points:result.points});
    }
    // Always evaluate saved matchups, including cycles with zero ESPN score changes.
    await change((s,accounts)=>{
