@@ -21,6 +21,26 @@ const PUSH_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
 const PUSH_READY = Boolean(PUSH_PUBLIC_KEY && PUSH_PRIVATE_KEY);
 if (PUSH_READY) webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:admin@example.com', PUSH_PUBLIC_KEY, PUSH_PRIVATE_KEY);
 
+// Read-only VAPID diagnostics. Never print key material or full push endpoints.
+function pushAuthDiagnostics(endpoint){
+  const result={keyPairMatches:null,publicKeyBytes:null,privateKeyBytes:null,endpointHost:null,subjectScheme:null};
+  try{
+    const publicBytes=Buffer.from(PUSH_PUBLIC_KEY,'base64url');
+    const privateBytes=Buffer.from(PUSH_PRIVATE_KEY,'base64url');
+    result.publicKeyBytes=publicBytes.length;
+    result.privateKeyBytes=privateBytes.length;
+    if(privateBytes.length===32&&publicBytes.length===65){
+      const ecdh=crypto.createECDH('prime256v1');
+      ecdh.setPrivateKey(privateBytes);
+      result.keyPairMatches=ecdh.getPublicKey().equals(publicBytes);
+    }else result.keyPairMatches=false;
+  }catch{result.keyPairMatches=false;}
+  try{result.endpointHost=new URL(endpoint).hostname;}catch{}
+  const subject=process.env.VAPID_SUBJECT||'mailto:admin@example.com';
+  result.subjectScheme=subject.startsWith('mailto:')?'mailto':subject.startsWith('https://')?'https':'other';
+  return result;
+}
+
 // Fresh ESPN weekly data, separate from the six-hour draft directory cache.
 // Null is unknown; zero is a legitimate ESPN weekly projection.
 const faWeeklyFeedCache=new Map();
@@ -2147,7 +2167,7 @@ async function notifyManager(manager,payload){
     try{await webpush.sendNotification(row.subscription,JSON.stringify(payload),{TTL:300});sent=true;}
     catch(e){if(e.statusCode===404||e.statusCode===410)
       await pool.query('DELETE FROM fantasy_audible_push WHERE endpoint=$1',[row.endpoint]);
-      else console.error('Push delivery:',JSON.stringify({statusCode:e.statusCode||null,message:e.message,body:typeof e.body==='string'?e.body.slice(0,300):null}));}
+      else console.error('Push delivery:',JSON.stringify({statusCode:e.statusCode||null,message:e.message,body:typeof e.body==='string'?e.body.slice(0,300):null,diagnostics:pushAuthDiagnostics(row.endpoint)}));}
   }));return sent;
 }
 let faRosterStatusPolling=false;
