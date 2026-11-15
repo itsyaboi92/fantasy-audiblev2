@@ -86,8 +86,9 @@ function faStatProjection(record,position,rules){
 function faWeeklyRecord(raw,week){
   const p=raw.player||raw;
   const records=[...(Array.isArray(p.stats)?p.stats:[]),...(Array.isArray(raw.stats)?raw.stats:[])];
-  const record=records.find(x=>Number(x.statSourceId)===1&&Number(x.scoringPeriodId)===week&&
-    (x.seasonId==null||Number(x.seasonId)===Number(process.env.ESPN_SEASON||2026)));
+  // Match the requested scoring period; season is already scoped by the ESPN URL.
+  // Do not reject valid records because an independent environment setting differs.
+  const record=records.find(x=>Number(x.statSourceId)===1&&Number(x.scoringPeriodId)===week);
   return {id:String(p.id),injuryStatus:String(p.injuryStatus||'UNKNOWN').toUpperCase(),
     teamId:p.proTeamId==null?null:String(p.proTeamId),
     projectedStats:record?.stats&&typeof record.stats==='object'?record.stats:null,
@@ -1351,9 +1352,12 @@ async function api(req,res,route){
       // designation. The roster's old team ID is not authoritative after trades.
       const directory=await draftPool();
       const players={};
+      const rosterByEspnId=new Map((current.state.players||[]).filter(p=>p.espnId!=null).map(p=>[String(p.espnId),p]));
       for(const p of directory.players){
         const id=String(p.id);
-        players[id]={teamId:p.nflTeamId==null?null:String(p.nflTeamId),
+        const roster=rosterByEspnId.get(id);
+        const fallbackTeam=p.nflTeamId??roster?.nflTeamId??roster?.proTeamId??roster?.teamId;
+        players[id]={teamId:fallbackTeam==null||String(fallbackTeam)==='0'?null:String(fallbackTeam),
           injuryStatus:p.injuryStatus||'UNKNOWN',position:p.position,
           // Season projections must not masquerade as week projections.
           weeklyProjectedPoints:null};
