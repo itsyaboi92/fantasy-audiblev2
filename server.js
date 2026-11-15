@@ -2434,6 +2434,13 @@ let checkingTimer=false;setInterval(async()=>{if(checkingTimer)return;checkingTi
   try{await processAutomaticTurn();}catch(e){console.error('Draft timer error:',e);}finally{checkingTimer=false;}},1000);
 setInterval(()=>processTradeDeadlines().catch(e=>console.warn('Trade deadline:',e.message)),60000).unref();
 // Lightweight, periodic process-level telemetry; does not retain heap snapshots.
+// Monitor memory independently of resourceJobs: other timers and HTTP handlers also allocate.
+const memoryProbe=setInterval(()=>{
+  const m=process.memoryUsage();
+  const mb=n=>Math.round(n/1048576);
+  console.info('[process-memory]',JSON.stringify({rssMB:mb(m.rss),heapUsedMB:mb(m.heapUsed),heapTotalMB:mb(m.heapTotal),externalMB:mb(m.external),arrayBuffersMB:mb(m.arrayBuffers),uptimeSec:Math.round(process.uptime())}));
+},10000);
+memoryProbe.unref();
 const memoryReport=setInterval(()=>console.info('[memory-health]',JSON.stringify(resourceJobs.status())),60000);
 memoryReport.unref();
 init().then(()=>server.listen(PORT,()=>console.log('Fantasy Audible running on '+PORT)))
