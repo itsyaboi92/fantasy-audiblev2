@@ -1,0 +1,12 @@
+'use strict';
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const server=fs.readFileSync('server.js','utf8');
+const ui=fs.readFileSync('public/app.js','utf8');
+const scoring=server.slice(server.indexOf('async function syncNFLScoring(){'),server.indexOf('async function reconcileHistoricalMatchups(){'));
+assert.match(scoring,/mapBounded\(games\.filter\(g=>g\.status!=='upcoming'\),1,/);
+assert.match(scoring,/summaries\.set\(g\.id,\{summary\}\)/);
+assert.doesNotMatch(scoring,/summaries\.set\(g\.id,\{summary,players:/);
+assert.match(ui,/g\.status==='playing'\|\|g\.status==='final'/);
+assert.match(ui,/matchupActualPoints\(p,week\)/);
+console.log('Phase 3 memory and matchup-status regression checks passed');

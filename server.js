@@ -1858,9 +1858,11 @@ async function syncNFLScoring(){
     if(!(state.frozenMatchupSchedule?.[week]||[]).length)return;
     const games=await liveNFL.loadWeek(season,week);
     const summaries=new Map(),failures=[];
-    await mapBounded(games.filter(g=>g.status!=='upcoming'),2,async g=>{
+    await mapBounded(games.filter(g=>g.status!=='upcoming'),1,async g=>{
       try{const summary=await liveNFL.fetchGame(g.id);
-        summaries.set(g.id,{summary,players:liveNFL.playerStats(summary),events:liveNFL.playEvents(summary)});}
+        // Keep one authoritative summary only. Derived player/event collections
+        // were not used by this scoring path and multiplied peak allocations.
+        summaries.set(g.id,{summary});}
       catch(e){failures.push(g.id+': '+e.message);}
     });
     for(const [gameId,box] of summaries){
