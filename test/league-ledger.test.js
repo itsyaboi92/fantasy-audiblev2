@@ -37,3 +37,25 @@ test('finalized matchups remain immutable',()=>{
  const m=s.weeklyLedger[9].matchups['9-m1-m2'];m.status='final';m.homeScore=10;a.points=99;
  updateWeeklyLedger(s,accounts,9,games,[]);assert.equal(m.homeScore,10);
 });
+
+test('pre-kickoff changes are allowed',()=>{
+ const {s,a,games,accounts}=setup();games[0].kickoff='2999-01-01T00:00:00Z';
+ updateWeeklyLedger(s,accounts,9,games,[]);a.slot='BENCH';
+ s.players.push({id:'p3',name:'Prekickoff',owner:'m1',slot:'QB',pos:'QB',nflTeamId:'4',scoreWeek:9,points:0,liveScoreStatus:'UPCOMING'});
+ updateWeeklyLedger(s,accounts,9,games,[]);
+ assert.deepEqual(s.weeklyLedger[9].matchups['9-m1-m2'].homeLineup.map(p=>p.id),['p3']);
+});
+test('injury history cannot authorize an unrelated replacement',()=>{
+ const {s,a,games,accounts}=setup();updateWeeklyLedger(s,accounts,9,games,[]);
+ a.slot='BENCH';s.players.push({id:'p4',name:'Unrelated',owner:'m1',slot:'QB',pos:'QB',nflTeamId:'4',scoreWeek:9,points:0});
+ s.injurySwapHistory.push({week:9,manager:'m1',removedId:'p1',replacementId:'p3',mode:'later'});
+ updateWeeklyLedger(s,accounts,9,games,[]);
+ const m=s.weeklyLedger[9].matchups['9-m1-m2'];
+ assert.equal(m.homeLineup[0].id,'p1');
+ assert.equal(m.snapshotIntegrityIssues[0].reason,'RECORDED_REPLACEMENT_NOT_IN_LINEUP');
+});
+test('final NFL slate does not automatically certify provisional scores',()=>{
+ const {s,games,accounts}=setup();updateWeeklyLedger(s,accounts,9,games,[]);
+ games[0].status='final';updateWeeklyLedger(s,accounts,9,games,[]);
+ assert.equal(s.weeklyLedger[9].matchups['9-m1-m2'].status,'provisional');
+});
