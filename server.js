@@ -1296,7 +1296,23 @@ async function api(req,res,route){
       const week=Number(weekKey);
       const matches=Object.values(ledger?.matchups||{});
       const fixtureIds=new Set(),participants=new Set(),lineupFingerprints=new Map();
+      const scheduled=current.state.frozenMatchupSchedule?.[week]||[];
+      const scheduledById=new Map(scheduled.map(f=>[String(f.id),f]));
       for(const m of matches){
+        const fixture=scheduledById.get(String(m.id));
+        if(!fixture)issues.push({week,matchId:m.id,type:'MATCHUP_NOT_IN_FROZEN_SCHEDULE'});
+        else if(String(fixture.home)!==String(m.home)||String(fixture.away)!==String(m.away))
+          issues.push({week,matchId:m.id,type:'MATCHUP_TEAMS_DIFFER_FROM_SCHEDULE',
+            scheduled:{home:fixture.home,away:fixture.away},stored:{home:m.home,away:m.away}});
+        for(const side of ['homeLineup','awayLineup']){
+          const lineup=m[side];
+          const manager=String(m[side==='homeLineup'?'home':'away']);
+          for(const p of Array.isArray(lineup)?lineup:[]){
+            const snapshotOwner=String(p.owner??'');
+            if(snapshotOwner&&snapshotOwner!==manager)
+              issues.push({week,matchId:m.id,type:'SNAPSHOT_OWNER_MISMATCH',side,playerId:String(p.id)});
+          }
+        }
         const pair=[String(m.home),String(m.away)].sort().join(':');
         if(fixtureIds.has(pair))issues.push({week,matchId:m.id,type:'DUPLICATE_PAIR',pair});
         fixtureIds.add(pair);
@@ -1315,6 +1331,8 @@ async function api(req,res,route){
           else if(ids.length)lineupFingerprints.set(fingerprint,{matchId:m.id,side});
         }
       }
+      for(const fixture of scheduled)if(!matches.some(m=>String(m.id)===String(fixture.id)))
+        issues.push({week,matchId:fixture.id,type:'SCHEDULED_MATCHUP_MISSING_FROM_LEDGER'});
       weeks.push({week,matchups:matches.length,final:matches.filter(m=>m.status==='final').length,
         provisional:matches.filter(m=>m.status!=='final').length});
     }
