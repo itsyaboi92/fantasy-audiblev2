@@ -1,4 +1,7 @@
-let state=null,manager=null,tab=new URLSearchParams(location.search).get('tab')==='Notifications'?'Notifications':'Home',token=localStorage.getItem('audibleToken');
+const launchTab=new URLSearchParams(location.search).get('tab');
+const allowedLaunchTabs=new Set(['Home','Notifications','Locker Room','My Team','Matchup','League','Players','My Waivers','Postseason','Draft']);
+const notificationLaunch=allowedLaunchTabs.has(launchTab)&&launchTab!=='Home';
+let state=null,manager=null,tab=allowedLaunchTabs.has(launchTab)?launchTab:'Home',token=localStorage.getItem('audibleToken');
 let chatMessages=[],chatMuted=false,chatMutedManagers=[],chatLastId=0,chatSeenId=Number(localStorage.getItem('audibleChatSeen')||0),chatLoading=false,chatError='',chatDraft='',chatPendingGif=null,giphyOpen=false,giphyResults=[],giphyQuery='',giphyError='',giphyBusy=false,giphyRequest=0;
 let matchupWeek=null,matchupIndex=0,matchupTouchX=null,matchupAutoWeek=null;
 let viewedLeagueTeamId=null;
@@ -1720,9 +1723,9 @@ function faEntranceDismiss(){
   faEntranceReady=false;
 }
 
-async function connect(){if(!token)return authForm();faEntranceInit();try{const response=await fetch('/api/state',{
+async function connect(){if(!token)return authForm();if(!notificationLaunch)faEntranceInit();try{const response=await fetch('/api/state',{
   headers:{Authorization:'Bearer '+token},cache:'no-store'});if(response.status===401){faEntranceDismiss();return logout();}
-  if(!response.ok)throw Error('Server unavailable');state=await response.json();manager=state.viewer.manager;render();faEntranceReady=true;loadChat();}
+  if(!response.ok)throw Error('Server unavailable');state=await response.json();manager=state.viewer.manager;render();faEntranceReady=true;if(notificationLaunch&&tab==='Locker Room')loadChat();else loadChat();}
   catch(e){faEntranceDismiss();$('connection').textContent='● Offline';return;}
   await syncServerClock();const events=new EventSource('/api/events?token='+encodeURIComponent(token));
   let previousPickCount=state.draft?.picks?.length??0,previousDeadline=state.draft?.deadline??null,
