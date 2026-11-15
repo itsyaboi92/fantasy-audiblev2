@@ -56,6 +56,18 @@ async function enablePush(){
     const registration=await navigator.serviceWorker.register('/sw.js');
     const key=Uint8Array.from(atob(config.publicKey.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
     let subscription=await registration.pushManager.getSubscription();
+    // Existing subscriptions can be bound to a previous VAPID key after server reconfiguration.
+    const existingKey=subscription?.options?.applicationServerKey;
+    const matchesKey=existingKey&&
+      new Uint8Array(existingKey).length===key.length&&
+      new Uint8Array(existingKey).every((value,index)=>value===key[index]);
+    if(subscription&&!matchesKey){
+      // Remove the old endpoint server-side before replacing the browser subscription.
+      await apiPost('/api/push/unsubscribe',{endpoint:subscription.endpoint});
+      const removed=await subscription.unsubscribe();
+      if(!removed)throw Error('Could not replace old push subscription. Please retry.');
+      subscription=null;
+    }
     if(!subscription)subscription=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
     await apiPost('/api/push/subscribe',{subscription:subscription.toJSON()});
     toast('Injury push notifications enabled');
