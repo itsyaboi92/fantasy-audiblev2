@@ -807,7 +807,13 @@ function lineupManager(mine){
   const roster=state.settings?.roster||{bench:7,ir:1};
   const rows=lineupSlots().map(({key,position,index})=>{
     const selected=lineupDraft[key];
+    // Only offer bench players or the current selection; starters assigned
+    // to another slot are not valid choices for this slot's dropdown.
+    const assignedElsewhere=new Set(Object.entries(lineupDraft)
+      .filter(([otherKey,id])=>otherKey!==key&&id)
+      .map(([,id])=>String(id)));
     const choices=mine.filter(p=>p.slot!=='IR'&&
+      !assignedElsewhere.has(String(p.id))&&
       (position==='FLEX'?['RB','WR','TE'].includes(p.pos):p.pos===position));
     return `<div class="row"><div><b>${esc(position)} ${index+1}</b>${selected?rosterMatchupDetails(mine.find(p=>String(p.id)===String(selected))||{}):''}</div>
       <select style="max-width:70%;min-width:170px" onchange="updateLineupSelection(${jsAttr(key)},this.value)">
