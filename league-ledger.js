@@ -24,6 +24,39 @@ function updateWeeklyLedger(s,accounts,week,games,failures){
     // roster. Historical reconciliation updates the saved entries directly.
     if(prior&&allFinal)continue;
     const homeLineup=ledgerLineup(s,match.home,week),awayLineup=ledgerLineup(s,match.away,week);
+    // Never silently replace a previously captured starter after that player's
+    // NFL kickoff. Legitimate injury swaps are retained when the swap history
+    // explicitly records the player being removed from this manager's lineup.
+    // Preserve the existing snapshot for investigation rather than corrupting
+    // historical evidence or guessing how the lineup should be reconstructed.
+    if(prior){
+      const gameByTeam=new Map();
+      for(const game of games||[])for(const team of game.teams||[]){
+        const teamId=typeof team==='object'?team.id:team;
+        gameByTeam.set(String(teamId),game);
+      }
+      const changedSides=[];
+      for(const [side,manager,next] of [
+        ['homeLineup',match.home,homeLineup],['awayLineup',match.away,awayLineup]]){
+        const nextIds=new Set(next.map(p=>String(p.id)));
+        for(const old of prior[side]||[]){
+          if(nextIds.has(String(old.id)))continue;
+          const game=gameByTeam.get(String(old.nflTeamId??old.team??''));
+          const kickoff=Date.parse(game?.kickoff||'');
+          if(!Number.isFinite(kickoff)||Date.now()<kickoff)continue;
+          const approved=(s.injurySwapHistory||[]).some(x=>
+            Number(x.week)===week&&String(x.manager)===String(manager)&&
+            String(x.removedId)===String(old.id));
+          if(!approved)changedSides.push({side,playerId:String(old.id)});
+        }
+      }
+      if(changedSides.length){
+        prior.warning='Lineup snapshot protected: a starter disappeared after kickoff without a recorded injury substitution.';
+        prior.snapshotIntegrityIssues=changedSides;
+        prior.updatedAt=new Date().toISOString();
+        continue;
+      }
+    }
     const allPlayers=[...homeLineup,...awayLineup];
     const verified=allPlayers.every(p=>p.liveScoreStatus==='UPDATED'&&
     (!p.scoringMode||p.scoringMode==='later')&&Number.isFinite(p.points));
