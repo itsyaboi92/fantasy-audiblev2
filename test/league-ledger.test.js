@@ -59,3 +59,25 @@ test('final NFL slate does not automatically certify provisional scores',()=>{
  games[0].status='final';updateWeeklyLedger(s,accounts,9,games,[]);
  assert.equal(s.weeklyLedger[9].matchups['9-m1-m2'].status,'provisional');
 });
+
+test('multiple fixtures keep independent player lineups and scores',()=>{
+ const {s,games,accounts}=setup();
+ s.players.push({id:'p3',owner:'m3',slot:'QB',pos:'QB',nflTeamId:'6',scoreWeek:9,points:17,liveScoreStatus:'UPDATED'});
+ s.players.push({id:'p4',owner:'m4',slot:'QB',pos:'QB',nflTeamId:'7',scoreWeek:9,points:19,liveScoreStatus:'UPDATED'});
+ s.frozenMatchupSchedule[9].push({id:'9-m3-m4',home:'m3',away:'m4'});
+ updateWeeklyLedger(s,accounts,9,games,[]);
+ const first=s.weeklyLedger[9].matchups['9-m1-m2'],second=s.weeklyLedger[9].matchups['9-m3-m4'];
+ assert.deepEqual(first.homeLineup.map(p=>p.id),['p1']);
+ assert.deepEqual(second.homeLineup.map(p=>p.id),['p3']);
+ assert.equal(first.homeScore,10);assert.equal(second.homeScore,17);
+});
+test('missing NFL game feed remains provisional',()=>{
+ const {s,accounts}=setup();updateWeeklyLedger(s,accounts,9,[],['ESPN unavailable']);
+ assert.equal(s.weeklyLedger[9].matchups['9-m1-m2'].status,'provisional');
+});
+test('incomplete player scoring remains provisional even with final games',()=>{
+ const {s,games,accounts}=setup();
+ s.players[0].liveScoreStatus='STALE';games[0].status='final';
+ updateWeeklyLedger(s,accounts,9,games,[]);
+ assert.equal(s.weeklyLedger[9].matchups['9-m1-m2'].status,'provisional');
+});
