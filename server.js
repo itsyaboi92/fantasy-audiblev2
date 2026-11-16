@@ -2283,12 +2283,33 @@ async function pollLiveInjuries(){
     const raw=await response.json(),entries=Array.isArray(raw)?raw:raw.players||[];
     const statuses=new Map();for(const entry of entries){const p=entry.player||entry;
       if(ids.has(String(p.id)))statuses.set(String(p.id),String(p.injuryStatus||'UNKNOWN').toUpperCase());}
+    // The first ESPN page is not guaranteed to contain every live starter.
+    // Fetch only missing IDs, in small batches, rather than downloading the
+    // entire player directory every 30 seconds.
+    const missing=[...ids].filter(id=>!statuses.has(id));
+    let recovered=0;
+    for(let i=0;i<missing.length;i+=50){
+      const batch=missing.slice(i,i+50);
+      try{
+        const targeted=await fetch(url,{headers:{Accept:'application/json',
+          'X-Fantasy-Filter':JSON.stringify({players:{filterIds:{value:batch},limit:batch.length}})},
+          signal:AbortSignal.timeout(12000)});
+        if(!targeted.ok)throw Error('ESPN targeted injury feed HTTP '+targeted.status);
+        const payload=await targeted.json();
+        const found=Array.isArray(payload)?payload:payload.players||[];
+        for(const item of found){const p=item.player||item,id=String(p.id);
+          if(ids.has(id)&&!statuses.has(id)){statuses.set(id,String(p.injuryStatus||'UNKNOWN').toUpperCase());recovered++;}}
+      }catch(e){console.warn('[live-injury-targeted-fetch]',e.message);}
+    }
+    console.info('[live-injury-coverage]',JSON.stringify({starters:ids.size,matched:statuses.size,
+      missing:ids.size-statuses.size,recovered}));
     if(!statuses.size)return;
     const alerts=[];
     await change(s=>{
       s.injuryObservations=s.injuryObservations||{};
       for(const player of s.players){if(!ids.has(String(player.espnId)))continue;
-        const status=statuses.get(String(player.espnId));if(!status)continue;
+        const status=statuses.get(String(player.espnId));
+        if(!status||status==='UNKNOWN'||status==='UNAVAILABLE')continue;
         const previous=s.injuryObservations[player.id];
         s.injuryObservations[player.id]=status;player.injuryStatus=status;
         // Never treat a first observation as a new injury. Require a status transition
