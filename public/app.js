@@ -125,7 +125,7 @@ async function removeTeamPhoto(){if(!confirm('Remove your team photo?'))return;
   catch(e){toast(e.message);}}
 function faLatestMeta(x){
   const season=Number(state?.nflDirectorySync?.season||new Date().getFullYear());
-  const week=Number(state?.nflDirectorySync?.currentWeek||state?.week||1);
+  const week=Number(state?.week||state?.nflDirectorySync?.currentWeek||1);
   return nflPlayerMetaCache[season+':'+week]?.data?.players?.[String(x.espnId||String(x.id).replace(/^espn-/,''))]||null;
 }
 function faPlayerSigma(meta,expected){
@@ -694,7 +694,7 @@ function optimizeProjectedLineup(){
   const slots=lineupSlots();
   if(slots.length>20){toast('Too many starting slots for lineup optimization');return;}
   const season=Number(state?.nflDirectorySync?.season||new Date().getFullYear());
-  const week=Math.min(18,Math.max(1,Number(state?.nflDirectorySync?.currentWeek||state?.week||1)));
+  const week=Math.min(18,Math.max(1,Number(state?.week||state?.nflDirectorySync?.currentWeek||1)));
   const key=season+':'+week;
   const metadata=nflPlayerMetaCache[key]?.data?.players;
   if(!metadata){toast('Matchup projections are still loading. Try again shortly.');fetchNFLMatchups(week);return;}
@@ -757,7 +757,7 @@ function optimizeProjectedLineup(){
 function playerGameLocked(player){
   if(player.espnId||player.nflGame){
     const season=Number(state?.nflDirectorySync?.season||new Date().getFullYear());
-    const week=Math.min(18,Math.max(1,Number(state?.nflDirectorySync?.currentWeek||state?.week||1)));
+    const week=Math.min(18,Math.max(1,Number(state?.week||state?.nflDirectorySync?.currentWeek||1)));
     const key=season+':'+week;
     const espnId=String(player.espnId||String(player.id||'').replace(/^espn-/,''));
     const meta=nflPlayerMetaCache[key]?.data?.players?.[espnId];
@@ -782,7 +782,7 @@ function playerGameLocked(player){
 }
 function rosterMatchupDetails(p){
   const season=Number(state?.nflDirectorySync?.season||new Date().getFullYear());
-  const week=Math.min(18,Math.max(1,Number(state?.nflDirectorySync?.currentWeek||state?.week||1)));
+  const week=Math.min(18,Math.max(1,Number(state?.week||state?.nflDirectorySync?.currentWeek||1)));
   const key=season+':'+week;
   const espnId=String(p.espnId||String(p.id||'').replace(/^espn-/,''));
   const meta=nflPlayerMetaCache[key]?.data?.players?.[espnId];
@@ -1533,7 +1533,7 @@ async function tradeSubmit(){
 function tradeLastScore(x){
   const id=String(x.espnId||String(x.id).replace(/^espn-/,''));
   const weekly=weeklyDirectory[id];
-  const currentWeek=Number(state?.nflDirectorySync?.currentWeek||state?.week||1);
+  const currentWeek=Number(state?.week||state?.nflDirectorySync?.currentWeek||1);
   if(weekly?.gameStatus==='final'&&Number(weekly.week)===currentWeek&&Number.isFinite(Number(weekly.points)))return Number(weekly.points);
   const season=Number(state?.nflDirectorySync?.season||new Date().getFullYear());
   const meta=nflPlayerMetaCache[season+':'+currentWeek]?.data?.players?.[id];
@@ -1611,11 +1611,11 @@ async function tradeCounter(id){
 }
 function changeTab(next){closeMatchupGameStats();if(next==='Matchup'&&tab!=='Matchup'){matchupWeek=null;matchupAutoWeek=null;matchupIndex=0;}tab=next;render();if(tab==='Draft')syncServerClock();
   if(tab==='Draft'||tab==='Players')loadESPN();
-  if(tab==='My Team'){loadWeeklyDirectory();fetchNFLMatchups(Math.min(18,Math.max(1,Number(state?.nflDirectorySync?.currentWeek||state?.week||1))));}
+  if(tab==='My Team'){loadWeeklyDirectory();fetchNFLMatchups(Math.min(18,Math.max(1,Number(state?.week||state?.nflDirectorySync?.currentWeek||1))));}
   if(tab==='Players'){loadWeeklyDirectory();fetchNFLMatchups(Math.min(18,Math.max(1,Number(state?.week||state?.nflDirectorySync?.currentWeek||selectedMatchupWeek()))));}
   if(tab==='Matchup'){loadWeeklyDirectory();fetchNFLMatchups(selectedMatchupWeek());}
   if(tab==='Players'||tab==='My Waivers')loadTransactions();
-  if(tab==='Locker Room')loadChat();if(tab==='League'){loadTrades();loadWeeklyDirectory();fetchNFLMatchups(Math.min(18,Math.max(1,Number(state?.nflDirectorySync?.currentWeek||state?.week||1))));}}
+  if(tab==='Locker Room')loadChat();if(tab==='League'){loadTrades();loadWeeklyDirectory();fetchNFLMatchups(Math.min(18,Math.max(1,Number(state?.week||state?.nflDirectorySync?.currentWeek||1))));}}
 function logout(){localStorage.removeItem('audibleToken');location.reload();}
 function authForm(){$('tabs').innerHTML='';$('connection').textContent='● Sign in';
   $('app').innerHTML=`<section class="card" style="max-width:500px;margin:auto"><h1>Fantasy Audible</h1>
