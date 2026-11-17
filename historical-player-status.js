@@ -2,10 +2,13 @@
 // Evidence-backed historical roster exceptions. Never infer inactivity from an
 // absent box-score row: that could be a feed outage or an unused active player.
 const evidence=[Object.freeze({
-  espnId:'4574716',season:2026,fromWeek:9,throughWeek:9,teamId:'14',
+  espnId:'4574716',season:2026,fromWeek:9,throughWeek:10,teamId:'14',
   status:'RELEASED',
   source:'https://www.nfl.com/news/rams-releasing-kicker-harrison-mevis-signing-k-blake-grupe-off-jets-practice-squad',
-  effectiveDate:'2026-10-13'
+  effectiveDate:'2026-10-13',
+  // Week 10: Mevis was not an active kicker; he joined Baltimore's practice
+  // squad on Nov 12. Do not extend this exception to Week 11 or beyond.
+  week10Evidence:'https://www.cbssports.com/nfl/players/3162619/harrison-mevis/fantasy/'
 })];
 function historicalStatus(espnId,season,week){
  const id=String(espnId||'').replace(/^espn-/,'');
@@ -13,6 +16,6 @@ function historicalStatus(espnId,season,week){
 }
 function verifiedInactive(espnId,season,week){
  const x=historicalStatus(espnId,season,week);
- return x&&x.status==='RELEASED'?{teamId:x.teamId,points:0,status:'INACTIVE',source:x.source}:null;
+ return x&&x.status==='RELEASED'?{teamId:x.teamId,points:0,status:'INACTIVE',source:Number(week)===10?x.week10Evidence:x.source}:null;
 }
 module.exports={historicalStatus,verifiedInactive};
