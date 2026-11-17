@@ -437,6 +437,22 @@ async function currentNFLCalendar(){
   const weekData=await weekly.json();
   const kickoffs=(weekData.events||[]).map(g=>Date.parse(g.competitions?.[0]?.date||g.date)).filter(Number.isFinite);
   if(!kickoffs.length)throw Error('NFL calendar missing kickoff times for Week '+week);
+  // ESPN's default scoreboard can remain on a completed week until the next
+  // week's first kickoff. Open the next fantasy lineup only after every NFL
+  // game in the reported week is officially final.
+  const weeklyEvents=Array.isArray(weekData.events)?weekData.events:[];
+  const allFinal=weeklyEvents.length>=10&&weeklyEvents.every(e=>e.status?.type?.completed===true);
+  if(allFinal&&week<18){
+    const nextResponse=await fetch(`${base}?dates=${season}&seasontype=2&week=${week+1}&limit=100`,
+      {signal:AbortSignal.timeout(9000)});
+    if(nextResponse.ok){
+      const nextData=await nextResponse.json();
+      const nextEvents=Array.isArray(nextData.events)?nextData.events:[];
+      const nextKickoffs=nextEvents.map(g=>Date.parse(g.competitions?.[0]?.date||g.date)).filter(Number.isFinite);
+      if(nextEvents.length>=10&&nextKickoffs.length===nextEvents.length)
+        return {week:week+1,season,firstKickoff:Math.min(...nextKickoffs)};
+    }
+  }
   return {week,season,firstKickoff:Math.min(...kickoffs)};
 }
 function validSchedule(schedule){return schedule&&typeof schedule==='object'&&Object.values(schedule).some(v=>Array.isArray(v)&&v.length>0);}
