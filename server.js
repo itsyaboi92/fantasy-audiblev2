@@ -1948,6 +1948,8 @@ async function syncNFLScoring(){
     if(state.scheduleSeason&&calendar.season!==state.scheduleSeason)return;
     const week=calendar.week;
     if(week<Number(state.scheduleStartWeek||1)||week>18)return;
+    // Do not replay a completed scoreboard week over a newer fantasy lineup week.
+    if(Number(state.week)>week)return;
     if(!(state.frozenMatchupSchedule?.[week]||[]).length)return;
     const games=await liveNFL.loadWeek(season,week);
     const summaries=new Map(),failures=[];
@@ -2013,6 +2015,21 @@ async function syncNFLScoring(){
       }
       s.week=week;
       updateWeeklyLedger(s,accounts,week,games,failures);
+      // ESPN's scoreboard may still report the completed week until Thursday.
+      // Preserve historical scoring before opening the next fantasy lineup.
+      const weekComplete=games.length>=10&&games.every(g=>g.status==='final')&&failures.length===0;
+      const nextWeek=week+1;
+      if(weekComplete&&nextWeek<=18&&(s.frozenMatchupSchedule?.[nextWeek]||[]).length){
+        s.week=nextWeek;
+        for(const p of s.players){
+          p.points=0;p.credited=0;delete p.scoreAtSwap;p.scoreWeek=nextWeek;
+          p.liveScoreStatus='UPCOMING';p.liveScoreUpdatedAt=null;
+          delete p.nflGame;
+        }
+        s.demoPointAdjustments={};
+        expireOldInjuryState(s);
+        audit(s,'NFL_WEEK_ADVANCED',null,'Week '+week+' completed; Week '+nextWeek+' lineups opened');
+      }
       s.postseasonNFLFinal ||= {};
       s.postseasonNFLFinal[week]=games.length>0&&games.every(g=>g.status==='final')&&failures.length===0;
       s.nflSync={season,week,at:new Date().toISOString(),games:games.map(g=>({id:g.id,status:g.status,kickoff:g.kickoff,teams:g.teams})),failures,updatedPlayers:changed,warning:'Hybrid event/box-score scoring: category-level box-score fallback; event-specific distances and returns retained. Check liveScoreStatus for provisional results.'};
