@@ -1121,10 +1121,15 @@ function matchupView(){
   // Future weeks have no recorded lineup yet. Preview today's roster without
   // carrying current-week fantasy points into the future matchup.
   const futurePreview=players=>players.map(p=>({...p,points:0,credited:0,scoreAtSwap:0,scoringMode:null}));
-  const leftPlayers=recorded?.homeLineup?lineupBySlot(recorded.homeLineup.map(p=>({...p,_frozenWeek:week}))):
-    (week>current?futurePreview(matchupStarters(game.home)):(isCurrent?matchupStarters(game.home):[]));
-  const rightPlayers=recorded?.awayLineup?lineupBySlot(recorded.awayLineup.map(p=>({...p,_frozenWeek:week}))):
-    (week>current?futurePreview(matchupStarters(game.away)):(isCurrent?matchupStarters(game.away):[]));
+  // Active-week lineups must reflect the saved roster. Ledger snapshots are
+  // historical records, not an editable week's source of truth.
+  const historical=week<current;
+  const leftPlayers=isCurrent?matchupStarters(game.home):
+    historical&&recorded?.homeLineup?lineupBySlot(recorded.homeLineup.map(p=>({...p,_frozenWeek:week}))):
+    week>current?futurePreview(matchupStarters(game.home)):[];
+  const rightPlayers=isCurrent?matchupStarters(game.away):
+    historical&&recorded?.awayLineup?lineupBySlot(recorded.awayLineup.map(p=>({...p,_frozenWeek:week}))):
+    week>current?futurePreview(matchupStarters(game.away)):[];
   const cells=STARTER_ORDER.map((slot,i)=>`<div class="fa-match-row"><div class="fa-player">${leftPlayers[i]?(week>current?`<b>${esc(leftPlayers[i].name)}</b><div class="muted small">Projected starter · 0.0 actual</div>`:matchupPlayerCell(leftPlayers[i])):'<span class="muted">Open slot</span>'}</div><div class="fa-position">${slot}</div><div class="fa-player fa-right">${rightPlayers[i]?(week>current?`<b>${esc(rightPlayers[i].name)}</b><div class="muted small">Projected starter · 0.0 actual</div>`:matchupPlayerCell(rightPlayers[i])):'<span class="muted">Open slot</span>'}</div></div>`).join('');
   const status=recorded?.status==='final'?'Final':week>current?'Upcoming':week<current?'Past week · provisional':(Object.values(nflMatchupCache[(Number(state.nflDirectorySync?.season||new Date().getFullYear()))+':'+week]?.data?.teams||{}).some(g=>g.status==='playing')?'Live / provisional':'Upcoming / awaiting kickoff');
   const total=(id,side)=>recorded?.status==='final'?fmt(Number(recorded[side+'Score'])||0):
