@@ -289,6 +289,21 @@ function gameMapFrom(games){const map=new Map();
     if(previous?.completed&&Date.now()<Date.parse(nextWednesdayEastern(Date.parse(previous.kickoff))))map.set(id,previous);
     if(game.completed&&Date.now()<Date.parse(nextWednesdayEastern(Date.parse(game.kickoff))))map.set(id,game);
   }return map;}
+// Drop eligibility uses the league's active week, not ESPN's rolling
+// scoreboard week. Acquisition/waiver classification retains its own rules.
+async function activeWeekDropMap(s){
+  const week=Number(s.week),season=Number(s.scheduleSeason||s.nflDirectorySync?.season||process.env.NFL_SEASON||new Date().getUTCFullYear());
+  if(!Number.isInteger(week)||week<1||week>18||!Number.isInteger(season))throw Error('Active league NFL week unavailable');
+  const games=await liveNFL.loadWeek(season,week);
+  if(games.length<10)throw Error('Incomplete active-week NFL schedule');
+  const map=new Map();
+  for(const game of games){
+    const kickoff=Date.parse(game.kickoff);
+    if(!Number.isFinite(kickoff))throw Error('Invalid active-week kickoff');
+    for(const team of game.teams||[])map.set(String(team.id),{kickoff:game.kickoff,completed:game.status==='final'});
+  }
+  return map;
+}
 function activeRoster(s,owner){return s.players.filter(x=>x.owner===owner&&x.slot!=='IR');}
 function transactionCapacity(s,owner,player,drop){
   const roster=settingsOf(s).roster,active=activeRoster(s,owner).filter(x=>x.id!==drop?.id);
@@ -331,9 +346,7 @@ function dropValidation(s,owner,id,gameMap){
       const kickoff=Date.parse(game.kickoff);
       if(!Number.isFinite(kickoff))return failure(503,'NFL kickoff time unavailable');
       if(Date.now()>=kickoff)return failure(409,'Cannot drop a player after their NFL kickoff');
-    }else if(nflSchedule.currentWeekTeams?.has(teamId)){
-      return failure(503,'NFL game missing from verified schedule');
-    } // No current-week game means bye; player remains droppable.
+    } // No game in the verified active week means bye; player remains droppable.
   }else if(lineupLocked(s,player)){
     return failure(409,'Cannot drop a locked lineup player');
   }
@@ -344,7 +357,7 @@ function dropValidation(s,owner,id,gameMap){
 async function processWaivers(){
   const {state}=await snapshot();
   if(!(state.waiverClaims||[]).length)return;
-  const games=await nflGames(),map=gameMapFrom(games),now=Date.now();
+  const games=await nflGames(),map=gameMapFrom(games),dropMap=await activeWeekDropMap(state),now=Date.now();
   await change(s=>{
     ensureTransactions(s);
     const due=new Set();
@@ -372,7 +385,7 @@ async function processWaivers(){
       for(const claim of claims){
         const drop=claim.dropId?s.players.find(p=>p.id===claim.dropId&&p.owner===claim.manager):null;
         if(claim.dropId&&!drop)continue;
-        if(drop&&dropValidation(s,claim.manager,drop.id,map)?.error)continue;
+        if(drop&&dropValidation(s,claim.manager,drop.id,dropMap)?.error)continue;
         if(transactionCapacity(s,claim.manager,{position:player.pos},drop))continue;
         const limit=settingsOf(s).transactions.acquisitionLimit;
         if(limit!==null&&acquisitionCount(s,claim.manager)>=limit)continue;
@@ -1615,9 +1628,13 @@ async function api(req,res,route){
       verifiedLineupSchedule={season:leagueSeason,week:leagueWeek,games};
     }catch(e){return send(res,503,{error:'Unable to verify NFL kickoff times. Lineup changes temporarily paused.',details:e.message});}
   }
-  let nflMap=null;
+  let nflMap=null,dropMap=null;
   if(route.startsWith('/api/transactions/')){
-    try{nflMap=gameMapFrom(await nflGames());}catch(e){return send(res,503,{error:e.message});}
+    try{
+      nflMap=gameMapFrom(await nflGames());
+      const {state:activeState}=await snapshot();
+      dropMap=await activeWeekDropMap(activeState);
+    }catch(e){return send(res,503,{error:e.message});}
   }
   const result=await change((s,accounts)=>{
     const actor=findUser(req,accounts);if(!actor)return failure(401,'Session expired');
@@ -1757,7 +1774,7 @@ async function api(req,res,route){
       ensureTransactions(s);
       const playerId=String(body.playerId||''),espnPlayer=espnData?.players.find(p=>String(p.id)===playerId);
       if(route==='/api/transactions/drop'){
-        const owned=dropValidation(s,actor.manager,String(body.playerId||''),nflMap);
+        const owned=dropValidation(s,actor.manager,String(body.playerId||''),dropMap);
         if(!owned||owned.error)return owned||failure(400,'Select a player to drop');
         const acquiredSameDay=owned.lastAcquiredAt&&owned.lastAcquisitionType!=='DRAFT'&&
           sameEasternDay(owned.lastAcquiredAt,Date.now());
@@ -1781,7 +1798,7 @@ async function api(req,res,route){
         kickoff:99,status:'upcoming',points:0,slot:'BENCH',owner:null};s.players.push(player);}
       const availability=transactionStatus(player,nflMap,s);
       const dropId=body.dropId?String(body.dropId):null;
-      const drop=dropValidation(s,actor.manager,dropId,nflMap);
+      const drop=dropValidation(s,actor.manager,dropId,dropMap);
       if(drop?.error)return drop;
       if(drop?.id===player.id)return failure(400,'Cannot drop the player being acquired');
       const limit=settingsOf(s).transactions.acquisitionLimit;
