@@ -514,23 +514,44 @@ function easternEditorialNow(now=new Date()){
   const fields=Object.fromEntries(parts.map(p=>[p.type,p.value]));return {day:fields.weekday,hour:Number(fields.hour)};
 }
 let editorialBusy=false;
-async function publishEditorial(){if(editorialBusy)return;editorialBusy=true;
-  try{const {state:preview}=await snapshot();
+async function publishEditorial(){
+  if(editorialBusy)return;
+  editorialBusy=true;
+  try{
+    const {state:preview}=await snapshot();
     const {day,hour}=easternEditorialNow();
-    const previewKind=day==='Tue'&&hour>=9?'recap':day==='Wed'&&hour>=9?'rankings':day==='Thu'&&hour>=9?'preview':day==='Sun'&&hour>=8?'outlook':null;
-    const previewWeek=previewKind==='recap'?Math.max(1,editorialWeek(preview)-1):editorialWeek(preview);
-    if(!previewKind||(preview.editorial||[]).some(e=>e.id===`${previewKind}-${previewWeek}`))return;
+    const scheduledKind=day==='Wed'&&hour>=9?'rankings':day==='Thu'&&hour>=9?'preview':day==='Sun'&&hour>=8?'outlook':null;
+    const current=editorialWeek(preview);
+    const candidateWeeks=[current,Math.max(1,current-1)];
+    const readyRecaps=candidateWeeks.filter(week=>{
+      const fixtures=preview.frozenMatchupSchedule?.[week]||[];
+      const ledger=preview.weeklyLedger?.[week]?.matchups||{};
+      return fixtures.length>0&&fixtures.every(f=>ledger[f.id]?.status==='final')&&
+        !(preview.editorial||[]).some(e=>e.id===`recap-${week}`);
+    });
+    if(!readyRecaps.length&&(!scheduledKind||(preview.editorial||[]).some(e=>e.id===`${scheduledKind}-${current}`)))return;
     await change(s=>{
-    const {day,hour}=easternEditorialNow();
-    const kind=day==='Tue'&&hour>=9?'recap':day==='Wed'&&hour>=9?'rankings':day==='Thu'&&hour>=9?'preview':day==='Sun'&&hour>=8?'outlook':null;
-    if(!kind)return {ok:true};
-    // Tuesday recap uses the previous week; Wednesday rankings and Thursday/Sunday coverage use the current week.
-    const week=kind==='recap'?Math.max(1,editorialWeek(s)-1):editorialWeek(s);
-    s.editorial ||= [];
-    if(s.editorial.some(e=>e.id===`${kind}-${week}`))return {ok:true};
-    const edition=editorialEdition(s,kind,week);if(edition)s.editorial.unshift(edition);
-    s.editorial=s.editorial.slice(0,48);return {ok:true};
-  });}catch(e){console.error('Editorial publish:',e.message);}finally{editorialBusy=false;}
+      s.editorial ||= [];
+      const nowWeek=editorialWeek(s);
+      for(const week of [nowWeek,Math.max(1,nowWeek-1)]){
+        const fixtures=s.frozenMatchupSchedule?.[week]||[];
+        const ledger=s.weeklyLedger?.[week]?.matchups||{};
+        if(fixtures.length&&fixtures.every(f=>ledger[f.id]?.status==='final')&&!s.editorial.some(e=>e.id===`recap-${week}`)){
+          const edition=editorialEdition(s,'recap',week);
+          if(edition)s.editorial.unshift(edition);
+        }
+      }
+      const {day:today,hour:currentHour}=easternEditorialNow();
+      const kind=today==='Wed'&&currentHour>=9?'rankings':today==='Thu'&&currentHour>=9?'preview':today==='Sun'&&currentHour>=8?'outlook':null;
+      if(kind&&!s.editorial.some(e=>e.id===`${kind}-${nowWeek}`)){
+        const edition=editorialEdition(s,kind,nowWeek);
+        if(edition)s.editorial.unshift(edition);
+      }
+      s.editorial=s.editorial.slice(0,48);
+      return {ok:true};
+    });
+  }catch(e){console.error('Editorial publish:',e.message);}
+  finally{editorialBusy=false;}
 }
 // v26: league-scoped Locker Room bot. This release still has one authenticated league;
 // its stable namespace prevents collisions and is ready for future per-league routing.
