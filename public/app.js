@@ -209,7 +209,7 @@ async function loadWeeklyDirectory(force=false){
 }
 function playerNextProjection(x){
   const season=Number(state?.nflDirectorySync?.season||new Date().getFullYear());
-  const week=Math.min(18,Math.max(1,Number(state?.nflDirectorySync?.currentWeek||state?.week||selectedMatchupWeek())));
+  const week=Math.min(18,Math.max(1,Number(state?.week||state?.nflDirectorySync?.currentWeek||selectedMatchupWeek())));
   const key=season+':'+week;
   const metadata=nflPlayerMetaCache[key]?.data?.players?.[String(x.espnId||String(x.id).replace(/^espn-/,''))];
   const game=nflMatchupCache[key]?.data?.teams?.[String(metadata?.teamId||x.nflTeamId||'')];
@@ -847,7 +847,7 @@ async function moveToSection(playerId,slot){
 const STARTER_ORDER=['QB','RB','RB','WR','WR','TE','FLEX','D/ST','K'];
 const NFL_TEAM_IDS={ARI:'22',ATL:'1',BAL:'33',BUF:'2',CAR:'29',CHI:'3',CIN:'4',CLE:'5',DAL:'6',DEN:'7',DET:'8',GB:'9',HOU:'34',IND:'11',JAX:'30',JAC:'30',KC:'12',LV:'13',LAR:'14',LA:'14',MIA:'15',MIN:'16',NE:'17',NO:'18',NYG:'19',NYJ:'20',PHI:'21',PIT:'23',SF:'25',SEA:'26',TB:'27',TEN:'10',WAS:'28'};
 setInterval(()=>{if(tab==='Matchup'&&state){loadWeeklyDirectory(true);fetchNFLMatchups(selectedMatchupWeek());}},60000);
-setInterval(()=>{if(token&&state&&!document.hidden){const week=Number(state.nflDirectorySync?.currentWeek||state.week||1);fetchNFLMatchups(week);}},5*60000);
+setInterval(()=>{if(token&&state&&!document.hidden){const week=Number(state.week||state.nflDirectorySync?.currentWeek||1);fetchNFLMatchups(week);}},5*60000);
 const nflMatchupCache={};const nflMatchupPending=new Set();const nflPlayerMetaCache={};
 async function fetchNFLMatchups(week){
   const season=Number(state?.nflDirectorySync?.season||new Date().getFullYear());
@@ -886,7 +886,7 @@ function nflPlayerGame(x){
   return {game:board?.teams?.[id]||null,loaded:!!board,verified};
 }
 function currentMatchupWeek(){
-  const current=Number(state?.nflDirectorySync?.currentWeek||state?.week||1);
+  const current=Number(state?.week||state?.nflDirectorySync?.currentWeek||1);
   const leagueStart=Number(state?.scheduleStartWeek||1);
   return Math.min(18,Math.max(1,Number.isFinite(current)?current:1,Number.isFinite(leagueStart)?leagueStart:1));
 }
@@ -1115,7 +1115,7 @@ function matchupView(){
   if(matchupWeek===null&&matchupAutoWeek!==week){matchupAutoWeek=week;const mine=games.findIndex(g=>g.home===manager||g.away===manager);matchupIndex=mine>=0?mine:0;}
   const game=games[matchupIndex],left=m(game.home),right=m(game.away);
   const byeTeams=state.managers.filter(x=>x.claimed&&!games.some(g=>g.home===x.id||g.away===x.id));
-  const current=Number(state.nflDirectorySync?.currentWeek||state.week||1),isCurrent=week===current;
+  const current=Number(state.week||state.nflDirectorySync?.currentWeek||1),isCurrent=week===current;
   const recorded=state.weeklyLedger?.[week]?.matchups?.[game.id];
   const lineupBySlot=rows=>{const used=new Set();return STARTER_ORDER.map(slot=>{const p=(rows||[]).find(x=>!used.has(x.id)&&(x.slot===slot||(slot==='FLEX'&&['RB','WR','TE'].includes(x.slot))));if(p)used.add(p.id);return p||null;});};
   // Future weeks have no recorded lineup yet. Preview today's roster without
@@ -1612,7 +1612,7 @@ async function tradeCounter(id){
 function changeTab(next){closeMatchupGameStats();if(next==='Matchup'&&tab!=='Matchup'){matchupWeek=null;matchupAutoWeek=null;matchupIndex=0;}tab=next;render();if(tab==='Draft')syncServerClock();
   if(tab==='Draft'||tab==='Players')loadESPN();
   if(tab==='My Team'){loadWeeklyDirectory();fetchNFLMatchups(Math.min(18,Math.max(1,Number(state?.nflDirectorySync?.currentWeek||state?.week||1))));}
-  if(tab==='Players'){loadWeeklyDirectory();fetchNFLMatchups(Math.min(18,Math.max(1,Number(state?.nflDirectorySync?.currentWeek||state?.week||selectedMatchupWeek()))));}
+  if(tab==='Players'){loadWeeklyDirectory();fetchNFLMatchups(Math.min(18,Math.max(1,Number(state?.week||state?.nflDirectorySync?.currentWeek||selectedMatchupWeek()))));}
   if(tab==='Matchup'){loadWeeklyDirectory();fetchNFLMatchups(selectedMatchupWeek());}
   if(tab==='Players'||tab==='My Waivers')loadTransactions();
   if(tab==='Locker Room')loadChat();if(tab==='League'){loadTrades();loadWeeklyDirectory();fetchNFLMatchups(Math.min(18,Math.max(1,Number(state?.nflDirectorySync?.currentWeek||state?.week||1))));}}
