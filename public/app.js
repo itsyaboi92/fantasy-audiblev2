@@ -163,18 +163,28 @@ function faSubRisk(x,starter,mode){
     ${esc(source)} · ${unavailable?'Unavailable to play':uncertain?'Health status limits forecast':'Assumes player is active'} · Not a calibrated probability</div>`;
 }
 function injuryCard(injury){const starter=p(injury.player);if(!starter||starter.owner!==manager)return '';
-  const choices=state.players.filter(x=>x.owner===manager&&x.slot==='BENCH'&&
+  const games=state.nflSync?.games||[];
+  const hasVerifiedGame=x=>!x.espnId||games.some(g=>g.teams?.some(t=>String(t.id)===String(x.nflTeamId)));
+  const choices=state.players.filter(x=>x.owner===manager&&x.slot==='BENCH'&&hasVerifiedGame(x)&&
     (starter.slot==='FLEX'?['RB','WR','TE'].includes(x.pos):x.pos===starter.pos)&&
     !(state.injurySwapHistory||[]).some(h=>h.week===state.week&&h.removedId===x.id))
     .map(x=>{const same=x.team===starter.team&&x.kickoff<=state.phase;
-      const later=x.kickoff>state.phase,eligible=same||later;
+      const later=x.kickoff>state.phase;
+      const starterGame=games.find(g=>g.teams?.some(t=>String(t.id)===String(starter.nflTeamId)));
+      const benchGame=games.find(g=>g.teams?.some(t=>String(t.id)===String(x.nflTeamId)));
+      const mode=starter.espnId&&x.espnId
+        ?(!starterGame||!benchGame?null:starterGame.id===benchGame.id
+          ?(String(x.nflTeamId)===String(starter.nflTeamId)&&starterGame.status==='live'?'handcuff':null)
+          :(benchGame.status==='upcoming'&&Date.parse(benchGame.kickoff)>Date.now()?'later':null))
+        :(same?'handcuff':later?'later':null);
+      const eligible=Boolean(mode);
       const health=faLatestMeta(x)?.injuryStatus||x.injuryStatus||'UNKNOWN';
       const healthKey=String(health).toUpperCase().replace(/[\s-]+/g,'_');
       const healthBlocked=['OUT','O','IR','INJURED_RESERVE','INJURY_RESERVE','RESERVE_INJURED','INJURED_RESERVE_DESIGNATED_TO_RETURN','SUSPENDED','SUSPENSION','PUP','PHYSICALLY_UNABLE_TO_PERFORM','NFI','NON_FOOTBALL_INJURY'].includes(healthKey);
-      if(healthBlocked)return '';
+      if(healthBlocked||!eligible)return '';
       return `<div class="row"><div><b>${esc(x.name)}</b> ${injuryLabel(health)}
-        <div class="muted small">${same?'Same-team handcuff: future points only':later?'Later kickoff: full-game points':'Not eligible'}</div>
-        <div>${faSubRisk(x,starter,same?'handcuff':'later')}</div></div>
+        <div class="muted small">${mode==='handcuff'?'Same-team handcuff: future points only':'Later kickoff: full-game points'}</div>
+        <div>${faSubRisk(x,starter,mode)}</div></div>
         <button ${eligible?'':'disabled'} onclick='act("/api/substitute",${JSON.stringify({injury:injury.id,bench:x.id})})'>Substitute</button></div>`;}).join('');
   return card('Injury substitution available',`<p><b>${esc(starter.name)}</b> — ${fmt(starter.points)} points</p>
     <p>Keep your starter or permanently substitute.</p>${choices||'<p>No eligible bench players.</p>'}
