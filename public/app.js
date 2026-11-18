@@ -96,7 +96,7 @@ async function apiPost(route,body){const response=await fetch(route,{method:'POS
   const result=await response.json();if(!response.ok)throw Error(result.error||'Request failed');return result;}
 async function act(route,body){if(route==='/api/substitute'){
     const replacement=state?.players?.find(x=>String(x.id)===String(body?.bench));
-    const health=String(faLatestMeta(replacement)?.injuryStatus||replacement?.injuryStatus||'UNKNOWN').toUpperCase().replace(/[\\s-]+/g,'_');
+    const health=String(faLatestMeta(replacement)?.injuryStatus||replacement?.injuryStatus||'UNKNOWN').toUpperCase().replace(/[\s-]+/g,'_');
     if(health==='DOUBTFUL'&&!confirm((replacement?.name||'This player')+' is listed as DOUBTFUL and is unlikely to play. Do you still want to select this player?'))return;
     if(!confirm('This substitution is permanent for this NFL week. Removed players cannot return, and their points are forfeited. Continue?'))return;
   }
@@ -169,7 +169,7 @@ function injuryCard(injury){const starter=p(injury.player);if(!starter||starter.
     .map(x=>{const same=x.team===starter.team&&x.kickoff<=state.phase;
       const later=x.kickoff>state.phase,eligible=same||later;
       const health=faLatestMeta(x)?.injuryStatus||x.injuryStatus||'UNKNOWN';
-      const healthKey=String(health).toUpperCase().replace(/[\\s-]+/g,'_');
+      const healthKey=String(health).toUpperCase().replace(/[\s-]+/g,'_');
       const healthBlocked=['OUT','O','IR','INJURED_RESERVE','INJURY_RESERVE','RESERVE_INJURED','INJURED_RESERVE_DESIGNATED_TO_RETURN','SUSPENDED','SUSPENSION','PUP','PHYSICALLY_UNABLE_TO_PERFORM','NFI','NON_FOOTBALL_INJURY'].includes(healthKey);
       if(healthBlocked)return '';
       return `<div class="row"><div><b>${esc(x.name)}</b> ${injuryLabel(health)}
