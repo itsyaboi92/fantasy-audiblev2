@@ -28,8 +28,18 @@ function expireOldInjuryState(s){
   }
 }
 
+function replacementHealthStatus(player){
+  const raw=String(player?.injuryStatus||'UNKNOWN').trim().toUpperCase().replace(/[\s-]+/g,'_');
+  return raw;
+}
+function replacementHealthEligible(player){
+  return !['OUT','O','IR','INJURED_RESERVE','INJURY_RESERVE','RESERVE_INJURED',
+    'INJURED_RESERVE_DESIGNATED_TO_RETURN','SUSPENDED','SUSPENSION',
+    'PUP','PHYSICALLY_UNABLE_TO_PERFORM','NFI','NON_FOOTBALL_INJURY'].includes(replacementHealthStatus(player));
+}
+
 function eligibility(s,starter,bench){if(!starter||!bench||starter.owner!==bench.owner||
-  starter.slot==='BENCH'||bench.slot!=='BENCH'||
+  starter.slot==='BENCH'||bench.slot!=='BENCH'||!replacementHealthEligible(bench)||
   !(starter.slot==='FLEX'?['RB','WR','TE'].includes(bench.pos):starter.pos===bench.pos)||
   injurySwapRetired(s,starter)||injurySwapRetired(s,bench))return null;
   // Real NFL schedule supersedes demo phase counters for drafted ESPN players.
@@ -45,4 +55,4 @@ function eligibility(s,starter,bench){if(!starter||!bench||starter.owner!==bench
   if(starter.team===bench.team&&bench.kickoff<=s.phase)return 'handcuff';
   if(bench.kickoff>s.phase)return 'later';return null;}
 
-module.exports={injurySwapWeek,injurySwapRetired,injurySwapCurrentSlot,activeSwapMode,activeSwapOffset,pendingInjury,expireOldInjuryState,eligibility};
+module.exports={injurySwapWeek,injurySwapRetired,injurySwapCurrentSlot,activeSwapMode,activeSwapOffset,pendingInjury,expireOldInjuryState,eligibility,replacementHealthStatus,replacementHealthEligible};
