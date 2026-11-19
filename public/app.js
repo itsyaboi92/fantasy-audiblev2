@@ -806,6 +806,7 @@ function rosterMatchupDetails(p){
   const meta=nflPlayerMetaCache[key]?.data?.players?.[espnId];
   // Prefer verified metadata; the ESPN directory may omit team IDs for injured players.
   // Maye's verified NE bye must not block the entire Week 11 forecast.
+  const feed=weeklyDirectory[id];
   const fallbackTeam=Number(week)===11&&Number(season)===2026&&String(p.name||'').trim().toLowerCase()==='drake maye'?'NE':'';
   const team=String(meta?.teamId||p.nflTeamId||p.team||feed?.teamId||feed?.team||fallbackTeam||'').toUpperCase();
   const teamId=/^\d+$/.test(team)?team:NFL_TEAM_IDS[team];
@@ -1048,7 +1049,6 @@ function faForecastPlayer(p,week){
   const team=String(meta?.teamId||p.nflTeamId||p.team||'').toUpperCase();
   const teamId=/^\d+$/.test(team)?team:NFL_TEAM_IDS[team];
   const game=nflMatchupCache[key]?.data?.teams?.[teamId];
-  const feed=weeklyDirectory[id];
   const liveGame=game?.status==='playing'||game?.status==='live';
   const finalGame=game?.status==='final';
   const raw=meta?.weeklyProjectedPoints;
