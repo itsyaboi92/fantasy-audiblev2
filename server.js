@@ -508,7 +508,31 @@ function editorialEdition(s,kind,week){
     standings.forEach((r,i)=>lines.push(`#${i+1} ${editorialTeam(s,r.manager)} — ${r.wins}-${r.losses}${r.ties?`-${r.ties}`:''}, ${r.pointsFor.toFixed(1)} points for. ${i===0?'Top of the mountain. Everybody else has homework.':i===standings.length-1?'The comeback tour better start soon.':'The standings do not negotiate.'}`));
   }else if(kind==='preview'){
     if(!fixtures.length)return null;
-    for(const f of fixtures)lines.push(`${editorialTeam(s,f.home)} vs ${editorialTeam(s,f.away)}. Bragging rights are on the line; the projections do not play the games.`);
+    const table=leagueStandings(s,[]); const ranks=new Map(table.map((r,i)=>[r.manager,{...r,rank:i+1}]));
+    const prior=Object.entries(s.weeklyLedger||{}).filter(([w])=>Number(w)<week);
+    for(const f of fixtures){
+      const h=editorialTeam(s,f.home),a=editorialTeam(s,f.away),hr=ranks.get(f.home),ar=ranks.get(f.away);
+      const record=r=>r?`${r.wins}-${r.losses}${r.ties?'-'+r.ties:''}`:'unranked';
+      const intro=`${h} (${record(hr)}) vs ${a} (${record(ar)}).`;
+      const history=prior.flatMap(([,v])=>Object.values(v.matchups||{})).filter(m=>(m.home===f.home&&m.away===f.away)||(m.home===f.away&&m.away===f.home)).filter(m=>m.status==='final');
+      const last=history[history.length-1];
+      const seed=[...(`${week}:${f.id}`)].reduce((n,c)=>n+c.charCodeAt(0),0);
+      const notes=[];
+      if(hr&&ar){
+        const gap=Math.abs(hr.wins-ar.wins);
+        if(gap>=3){const leader=hr.wins>ar.wins?h:a,underdog=hr.wins>ar.wins?a:h;
+          notes.push([`${leader} has the better record, but ${underdog} gets a chance to wreck the script.`,`${underdog} walks into this one as the standings underdog. ${leader} has more to lose than bragging rights.`,`The records favor ${leader}. If ${underdog} pulls this off, somebody's getting roasted next week.`][seed%3]);}
+        else if(hr.wins===ar.wins&&hr.losses===ar.losses)notes.push([`Identical records. Neither manager gets to hide behind the standings.`,`The standings can't separate these two. The scoreboard will have to.`][seed%2]);
+        else notes.push([`Only ${gap} win${gap===1?'':'s'} separate these teams. This one matters for the pecking order.`,`These records are close enough that the winner gets to talk and the loser has to listen.`][seed%2]);
+        if(hr.rank&&ar.rank&&Math.abs(hr.rank-ar.rank)===1)notes.push(`They're neighbors in the league standings at #${hr.rank} and #${ar.rank}. One of them gets to move the argument onto the field.`);
+      }
+      if(last){const winner=last.winner?editorialTeam(s,last.winner):null;
+        if(winner)notes.push(`Last verified meeting went to ${winner}, ${Number(last.homeScore).toFixed(1)}–${Number(last.awayScore).toFixed(1)}. Revenge is officially on the menu.`);
+        else notes.push('Their last verified meeting ended tied. Somebody finish the job this time.');
+      }
+      if(!notes.length)notes.push([`No reliable form guide yet. This is where somebody starts building a reputation.`,`The numbers aren't giving me a clear storyline yet. Give me a reason to remember this matchup.`,`Neither side has earned a prediction from me on the available evidence. Prove something.`][seed%3]);
+      lines.push(`${intro} ${notes.slice(0,2).join(' ')}`);
+    }
   }else if(kind==='outlook'){
     if(!fixtures.length)return null;
     lines.push('Sunday check-in: Thursday results are in the mix. These are snapshots, not final predictions; remaining games can change everything.');
