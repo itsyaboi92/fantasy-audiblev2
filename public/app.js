@@ -973,7 +973,7 @@ function matchupPlayerCell(x){
   return `<div class="fa-match-player-title">${name} ${injuryBadge}</div>
     <div class="muted small">${esc(gameLabel)}</div>
     <div class="muted small">${kickoff?esc(kickoff):(loaded?'No kickoff':'Loading kickoff…')} · ${esc(gameStatus)}</div>
-    <div class="muted small">OPRK: ${Number.isInteger(oprk)&&oprk>=1&&oprk<=32?oprk+(oprk%10===1&&oprk!==11?'st':oprk%10===2&&oprk!==12?'nd':oprk%10===3&&oprk!==13?'rd':'th'):'—'} · Proj: ${Number.isFinite(projected)&&projected>=0?fmt(projected)+' est.':'—'}</div>
+    <div class="muted small">OPRK: ${Number.isInteger(oprk)&&oprk>=1&&oprk<=32?oprk+(oprk%10===1&&oprk!==11?'st':oprk%10===2&&oprk!==12?'nd':oprk%10===3&&oprk!==13?'rd':'th'):'—'} · Proj: ${Number.isFinite(projected)&&projected>=0?fmt(projected)+' est.':'0.0 fallback'}</div>
     <strong>${fmt(matchupActualPoints(x,selectedMatchupWeek()))} <span class="muted small">pts</span></strong>`;
 }
 // v31: Game-specific player boxscore overlay, independent of season history.
@@ -1074,18 +1074,18 @@ function faForecastPlayer(p,week){
     ?Math.max(0,Number(p.credited)):actual;
   if(finalGame||progress===1)return {actual:credited,projected:credited,variance:0,known:true,live:false};
   if(explicitlyOut||onBye)return {actual:credited,projected:credited,variance:0,known:true,live:liveGame};
-  if(baseline===null||progress===null)return {actual:credited,projected:credited,variance:0,known:false,live:liveGame};
+  if(baseline===null||progress===null)return {actual:credited,projected:credited,variance:0,known:true,assumedZero:true,live:liveGame};
   const remaining=liveGame?faLiveRemaining(baseline,actual,progress):baseline;
   const calibrated=faPlayerSigma(meta,baseline);
   const sigma=calibrated.sigma*Math.sqrt(Math.max(0,1-(liveGame?progress:0)));
   return {actual:credited,projected:credited+remaining,variance:sigma*sigma,known:true,live:liveGame};
 }
 function faForecastTeam(players,week){
-  let actual=0,projected=0,variance=0,missing=0,live=0;
+  let actual=0,projected=0,variance=0,missing=0,live=0,assumedZero=0;
   for(const p of players){if(!p)continue;const x=faForecastPlayer(p,week);
-    actual+=x.actual;if(x.live)live++;
+    actual+=x.actual;if(x.live)live++;if(x.assumedZero)assumedZero++;
     if(x.known){projected+=x.projected;variance+=x.variance;}else{projected+=x.actual;missing++;}}
-  return {actual,projected,variance,missing,live};
+  return {actual,projected,variance,missing,live,assumedZero};
 }
 function faNormalCdf(x){
   // Abramowitz-Stegun approximation to the standard normal CDF.
@@ -1109,10 +1109,11 @@ function faMatchForecastView(leftPlayers,rightPlayers,week,recorded,ledgerHome,l
   const remainingB=Math.max(0,b.projected-b.actual);
   const finalA=earnedA+remainingA,finalB=earnedB+remainingB;
   const unknown=a.missing+b.missing;
+  const zeroFallbacks=a.assumedZero+b.assumedZero;
   const anyKnown=leftPlayers.concat(rightPlayers).some(p=>p&&faForecastPlayer(p,week).known);
   if(!anyKnown)return `<div class="fa-forecast muted small">Projected final scores loading or unavailable.</div>`;
-  // Without historical player-specific variance, this is a favorability indicator,
-  // not a statistically calibrated probability. Missing projections prohibit odds.
+  // This is a modeled indicator, not a calibrated probability. Missing ESPN
+  // projections contribute zero rather than blocking all matchup estimates.
   const variance=a.variance+b.variance;
   // Actual scores are locked in as games begin; only future points remain uncertain.
   const live=a.live+b.live>0;
@@ -1120,15 +1121,14 @@ function faMatchForecastView(leftPlayers,rightPlayers,week,recorded,ledgerHome,l
   const remainingLead=remainingA-remainingB;
   const modeledLead=actualLead+remainingLead;
   const chance=variance>0?faNormalCdf(modeledLead/Math.sqrt(variance)):
-    (unknown?0.5:modeledLead>0?1:modeledLead<0?0:0.5);
-  const percent=unknown?50:(variance===0?100*chance:Math.max(2,Math.min(98,100*chance)));
+    (modeledLead>0?1:modeledLead<0?0:0.5);
+  const percent=variance===0?100*chance:Math.max(2,Math.min(98,100*chance));
   return `<div class="fa-forecast" aria-label="Estimated matchup favorability">
     ${live?`<div class="fa-forecast-label" style="font-weight:700;margin-bottom:8px"><span>Live earned ${fmt(earnedA)}</span><span>${fmt(earnedB)} earned</span></div>`:''}
-    <div class="fa-forecast-label"><span>${unknown?'Known projected points':'Projected final'} <b>${fmt(finalA)}</b></span><span><b>${fmt(finalB)}</b> ${unknown?'Known projected points':'Projected final'}</span></div>
-    <div class="fa-favor-track" style="${unknown?'background:#57677f':''}">${unknown?'':`<div class="fa-favor-left" style="width:${percent.toFixed(2)}%"></div>
-      <div class="fa-favor-needle" style="left:${percent.toFixed(2)}%"></div>`}</div>
-    <div class="fa-forecast-label"><span>${unknown?'—':Math.round(percent)+'%'} favored</span><span>${unknown?'—':Math.round(100-percent)+'%'} favored</span></div>
-    <div class="muted small" style="text-align:center;margin-top:8px">${unknown?'Favorability unavailable · '+unknown+' missing ESPN stat projection'+(unknown===1?'':'s'):(live?'Live: earned points + projected remaining · ':'Pregame: projected final · ')+'modeled probability, not yet backtested'}</div>
+    <div class="fa-forecast-label"><span>Projected final <b>${fmt(finalA)}</b></span><span><b>${fmt(finalB)}</b> ${unknown?'Known projected points':'Projected final'}</span></div>
+    <div class="fa-favor-track" ><div class="fa-favor-left" style="width:${percent.toFixed(2)}%"></div><div class="fa-favor-needle" style="left:${percent.toFixed(2)}%"></div></div>
+    <div class="fa-forecast-label"><span>${Math.round(percent)}% favored</span><span>${Math.round(100-percent)}% favored</span></div>
+    <div class="muted small" style="text-align:center;margin-top:8px">${(live?'Live: earned points + projected remaining · ':'Pregame: projected final · ')+ 'modeled favorability, not yet backtested'+(zeroFallbacks?' · '+zeroFallbacks+' missing ESPN projection'+(zeroFallbacks===1?'':'s')+' treated as 0.0':'')}</div>
   </div>`;
 }
 function matchupView(){
