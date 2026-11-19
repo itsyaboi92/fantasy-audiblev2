@@ -508,30 +508,66 @@ function editorialEdition(s,kind,week){
     standings.forEach((r,i)=>lines.push(`#${i+1} ${editorialTeam(s,r.manager)} — ${r.wins}-${r.losses}${r.ties?`-${r.ties}`:''}, ${r.pointsFor.toFixed(1)} points for. ${i===0?'Top of the mountain. Everybody else has homework.':i===standings.length-1?'The comeback tour better start soon.':'The standings do not negotiate.'}`));
   }else if(kind==='preview'){
     if(!fixtures.length)return null;
-    const table=leagueStandings(s,[]); const ranks=new Map(table.map((r,i)=>[r.manager,{...r,rank:i+1}]));
+    const table=leagueStandings(s,[]), ranks=new Map(table.map((r,i)=>[r.manager,{...r,rank:i+1}]));
+    const teamCount=s.managers.length, playoffSpots=postseason.qualifiers(teamCount);
+    const finalWeek=postseason.endWeek(teamCount), weeksLeft=Math.max(0,finalWeek-week+1);
     const prior=Object.entries(s.weeklyLedger||{}).filter(([w])=>Number(w)<week);
+    const weeklyProjection=p=>{
+      const v=Number(p.weeklyProjectedPoints);
+      return p.weeklyProjectedPoints===null||p.weeklyProjectedPoints===undefined||!Number.isFinite(v)?null:v;
+    };
+    const teamProjection=id=>{
+      const starters=(s.players||[]).filter(p=>p.owner===id&&!['BENCH','IR'].includes(p.slot));
+      const known=starters.map(p=>({p,pts:weeklyProjection(p)})).filter(x=>x.pts!==null);
+      return {total:known.reduce((n,x)=>n+x.pts,0),complete:starters.length>0&&known.length===starters.length,
+        known:known.length,starters:starters.length,top:known.sort((a,b)=>b.pts-a.pts)[0]};
+    };
+    const facts=[];
     for(const f of fixtures){
       const h=editorialTeam(s,f.home),a=editorialTeam(s,f.away),hr=ranks.get(f.home),ar=ranks.get(f.away);
-      const record=r=>r?`${r.wins}-${r.losses}${r.ties?'-'+r.ties:''}`:'unranked';
-      const intro=`${h} (${record(hr)}) vs ${a} (${record(ar)}).`;
-      const history=prior.flatMap(([,v])=>Object.values(v.matchups||{})).filter(m=>(m.home===f.home&&m.away===f.away)||(m.home===f.away&&m.away===f.home)).filter(m=>m.status==='final');
-      const last=history[history.length-1];
-      const seed=[...(`${week}:${f.id}`)].reduce((n,c)=>n+c.charCodeAt(0),0);
-      const notes=[];
+      const hp=teamProjection(f.home),ap=teamProjection(f.away);
+      const notes=[],record=r=>r?`${r.wins}-${r.losses}${r.ties?'-'+r.ties:''}`:'unranked';
+      if(hp.complete&&ap.complete){
+        const diff=Math.abs(hp.total-ap.total),favorite=hp.total>=ap.total?h:a;
+        notes.push(`Projected ${hp.total.toFixed(1)}–${ap.total.toFixed(1)}. ${diff<5?'This is a toss-up on paper.':diff<15?`${favorite} has the edge, but one big performance can flip it.`:`${favorite} is favored by ${diff.toFixed(1)} points. That's a target on their back.`}`);
+      }else if(hp.known||ap.known){
+        notes.push(`Full matchup projections aren't available yet (${h}: ${hp.known}/${hp.starters} starters; ${a}: ${ap.known}/${ap.starters}). No fake favorite from me.`);
+      }
       if(hr&&ar){
-        const gap=Math.abs(hr.wins-ar.wins);
-        if(gap>=3){const leader=hr.wins>ar.wins?h:a,underdog=hr.wins>ar.wins?a:h;
-          notes.push([`${leader} has the better record, but ${underdog} gets a chance to wreck the script.`,`${underdog} walks into this one as the standings underdog. ${leader} has more to lose than bragging rights.`,`The records favor ${leader}. If ${underdog} pulls this off, somebody's getting roasted next week.`][seed%3]);}
-        else if(hr.wins===ar.wins&&hr.losses===ar.losses)notes.push([`Identical records. Neither manager gets to hide behind the standings.`,`The standings can't separate these two. The scoreboard will have to.`][seed%2]);
-        else notes.push([`Only ${gap} win${gap===1?'':'s'} separate these teams. This one matters for the pecking order.`,`These records are close enough that the winner gets to talk and the loser has to listen.`][seed%2]);
-        if(hr.rank&&ar.rank&&Math.abs(hr.rank-ar.rank)===1)notes.push(`They're neighbors in the league standings at #${hr.rank} and #${ar.rank}. One of them gets to move the argument onto the field.`);
+        if(hr.wins===0&&ar.losses===0&&ar.wins>0)notes.push(`${h} is hunting a first win against unbeaten ${a}. That is a dangerous amount of confidence on one sideline.`);
+        else if(ar.wins===0&&hr.losses===0&&hr.wins>0)notes.push(`${a} is hunting a first win against unbeaten ${h}. Someone's perfect record is on the menu.`);
+        else if(hr.wins===0||ar.wins===0)notes.push(`${hr.wins===0?h:a} is still looking for win number one. The excuses are running out.`);
+        else if(hr.losses===0||ar.losses===0)notes.push(`${hr.losses===0?h:a} is defending an unbeaten record.`);
+        else if(Math.abs(hr.wins-ar.wins)<=1)notes.push('These teams are close in the standings; this result could shake up the order.');
       }
-      if(last){const winner=last.winner?editorialTeam(s,last.winner):null;
-        if(winner)notes.push(`Last verified meeting went to ${winner}, ${Number(last.homeScore).toFixed(1)}–${Number(last.awayScore).toFixed(1)}. Revenge is officially on the menu.`);
-        else notes.push('Their last verified meeting ended tied. Somebody finish the job this time.');
-      }
-      if(!notes.length)notes.push([`No reliable form guide yet. This is where somebody starts building a reputation.`,`The numbers aren't giving me a clear storyline yet. Give me a reason to remember this matchup.`,`Neither side has earned a prediction from me on the available evidence. Prove something.`][seed%3]);
-      lines.push(`${intro} ${notes.slice(0,2).join(' ')}`);
+      const playoffNote=(r,name)=>{
+        if(!r||week>finalWeek)return null;
+        const ahead=table.filter(x=>x.manager!==r.manager&&x.wins>r.wins+weeksLeft).length;
+        if(ahead>=playoffSpots)return `${name} is mathematically out of playoff contention on wins alone.`;
+        if(r.rank>playoffSpots&&weeksLeft<=3)return `${name} sits outside the top ${playoffSpots} with ${weeksLeft} regular-season weeks including this one. Every result matters.`;
+        if(r.rank<=playoffSpots&&weeksLeft<=2)return `${name} currently holds a playoff position, but has not necessarily clinched.`;
+        return null;
+      };
+      const playoff=[playoffNote(hr,h),playoffNote(ar,a)].filter(Boolean);
+      if(playoff.length)notes.push(playoff.join(' '));
+      const history=prior.flatMap(([,v])=>Object.values(v.matchups||{})).filter(m=>((m.home===f.home&&m.away===f.away)||(m.home===f.away&&m.away===f.home))&&m.status==='final');
+      const last=history[history.length-1];
+      if(last?.winner)notes.push(`Last meeting: ${editorialTeam(s,last.winner)} won ${Number(last.homeScore).toFixed(1)}–${Number(last.awayScore).toFixed(1)}.`);
+      const star=[hp.top&&{name:hp.top.p.name,points:hp.top.pts,owner:h},ap.top&&{name:ap.top.p.name,points:ap.top.pts,owner:a}].filter(Boolean).sort((x,y)=>y.points-x.points)[0];
+      if(star)notes.push(`Player to watch: ${star.name} (${star.owner}), projected for ${star.points.toFixed(1)}.`);
+      if(!notes.length)notes.push('Both managers have something to prove. The lineup decisions will do the talking.');
+      facts.push({f,h,a,hr,ar,notes,record,hp,ap});
+    }
+    // Make each preview lead with a distinct, verified storyline when possible.
+    const leadCounts=new Map();
+    for(const x of facts){
+      const priority=x.notes.find(n=>/first win|unbeaten|perfect record|mathematically out/i.test(n))||
+        x.notes.find(n=>/Projected|projections aren't available/i.test(n))||x.notes[0];
+      const remaining=x.notes.filter(n=>n!==priority);
+      const leadKey=priority.slice(0,45);
+      const already=leadCounts.get(leadKey)||0;leadCounts.set(leadKey,already+1);
+      const chosen=already&&remaining.length?[remaining[0],priority,...remaining.slice(1)]:[priority,...remaining];
+      lines.push(`${x.h} (${x.record(x.hr)}) vs ${x.a} (${x.record(x.ar)}). ${chosen.slice(0,3).join(' ')}`);
     }
   }else if(kind==='outlook'){
     if(!fixtures.length)return null;
