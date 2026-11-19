@@ -543,7 +543,7 @@ function editorialEdition(s,kind,week){
       const playoffNote=(r,name)=>{
         if(!r||week>finalWeek)return null;
         const ahead=table.filter(x=>x.manager!==r.manager&&x.wins>r.wins+weeksLeft).length;
-        if(ahead>=playoffSpots)return `${name} is mathematically out of playoff contention on wins alone.`;
+        if(ahead>=playoffSpots)return `${name} cannot reach a playoff spot even by winning out, based on teams already ahead.`;
         if(r.rank>playoffSpots&&weeksLeft<=3)return `${name} sits outside the top ${playoffSpots} with ${weeksLeft} regular-season weeks including this one. Every result matters.`;
         if(r.rank<=playoffSpots&&weeksLeft<=2)return `${name} currently holds a playoff position, but has not necessarily clinched.`;
         return null;
@@ -580,7 +580,7 @@ function editorialEdition(s,kind,week){
       }else lines.push(`${editorialTeam(s,f.home)} vs ${editorialTeam(s,f.away)}: no current matchup scores recorded yet. Sunday is where the plot thickens.`);
     }
   }
-  return {id:`${kind}-${week}`,kind,week,title,lines,publishedAt:new Date().toISOString()};
+  return {id:`${kind}-${week}`,kind,week,title,lines,...(kind==='preview'?{commentaryVersion:3}:{}),publishedAt:new Date().toISOString()};
 }
 function easternEditorialNow(now=new Date()){
   const parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',weekday:'short',hour:'2-digit',hourCycle:'h23'}).formatToParts(now);
@@ -599,7 +599,7 @@ async function publishEditorial(){
     // Upgrade already-published bland previews in place, preserving their IDs.
     // Existing Locker Room announcements are intentionally not duplicated.
     const stalePreview=(preview.editorial||[]).some(e=>e.kind==='preview'&&
-      (e.lines||[]).some(line=>line.includes('Bragging rights are on the line; the projections do not play the games.')));
+      !(e.commentaryVersion>=3));
 
     const readyRecaps=candidateWeeks.filter(week=>{
       const fixtures=preview.frozenMatchupSchedule?.[week]||[];
@@ -612,9 +612,9 @@ async function publishEditorial(){
       s.editorial ||= [];
       for(let i=0;i<s.editorial.length;i++){
         const old=s.editorial[i];
-        if(old.kind!=='preview'||!(old.lines||[]).some(line=>line.includes('Bragging rights are on the line; the projections do not play the games.')))continue;
+        if(old.kind!=='preview'||old.commentaryVersion>=3)continue;
         const revised=editorialEdition(s,'preview',old.week);
-        if(revised)s.editorial[i]={...revised,publishedAt:old.publishedAt,updatedAt:new Date().toISOString()};
+        if(revised)s.editorial[i]={...revised,commentaryVersion:3,publishedAt:old.publishedAt,updatedAt:new Date().toISOString()};
       }
       const nowWeek=editorialWeek(s);
       for(const week of [nowWeek,Math.max(1,nowWeek-1)]){
