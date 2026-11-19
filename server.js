@@ -560,15 +560,26 @@ async function publishEditorial(){
     const scheduledKind=day==='Wed'&&hour>=9?'rankings':day==='Thu'&&hour>=9?'preview':day==='Sun'&&hour>=8?'outlook':null;
     const current=editorialWeek(preview);
     const candidateWeeks=[current,Math.max(1,current-1)];
+    // Upgrade already-published bland previews in place, preserving their IDs.
+    // Existing Locker Room announcements are intentionally not duplicated.
+    const stalePreview=(preview.editorial||[]).some(e=>e.kind==='preview'&&
+      (e.lines||[]).some(line=>line.includes('Bragging rights are on the line; the projections do not play the games.')));
+
     const readyRecaps=candidateWeeks.filter(week=>{
       const fixtures=preview.frozenMatchupSchedule?.[week]||[];
       const ledger=preview.weeklyLedger?.[week]?.matchups||{};
       return fixtures.length>0&&fixtures.every(f=>ledger[f.id]?.status==='final')&&
         !(preview.editorial||[]).some(e=>e.id===`recap-${week}`);
     });
-    if(!readyRecaps.length&&(!scheduledKind||(preview.editorial||[]).some(e=>e.id===`${scheduledKind}-${current}`)))return;
+    if(!stalePreview&&!readyRecaps.length&&(!scheduledKind||(preview.editorial||[]).some(e=>e.id===`${scheduledKind}-${current}`)))return;
     await change(s=>{
       s.editorial ||= [];
+      for(let i=0;i<s.editorial.length;i++){
+        const old=s.editorial[i];
+        if(old.kind!=='preview'||!(old.lines||[]).some(line=>line.includes('Bragging rights are on the line; the projections do not play the games.')))continue;
+        const revised=editorialEdition(s,'preview',old.week);
+        if(revised)s.editorial[i]={...revised,publishedAt:old.publishedAt,updatedAt:new Date().toISOString()};
+      }
       const nowWeek=editorialWeek(s);
       for(const week of [nowWeek,Math.max(1,nowWeek-1)]){
         const fixtures=s.frozenMatchupSchedule?.[week]||[];
