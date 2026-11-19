@@ -870,29 +870,37 @@ const nflMatchupCache={};const nflMatchupPending=new Set();const nflPlayerMetaCa
 async function fetchNFLMatchups(week){
   const season=Number(state?.nflDirectorySync?.season||new Date().getFullYear());
   const key=season+':'+week;
-  if(nflMatchupPending.has(key)||(nflMatchupCache[key]&&Date.now()-nflMatchupCache[key].at<60000))return;
+  const scheduleFresh=nflMatchupCache[key]&&Date.now()-nflMatchupCache[key].at<60000;
+  const metadataFresh=nflPlayerMetaCache[key]&&Date.now()-nflPlayerMetaCache[key].at<60000;
+  if(nflMatchupPending.has(key)||(scheduleFresh&&metadataFresh))return;
   nflMatchupPending.add(key);
   try{
-    const response=await fetch('/api/nfl/week-matchups?season='+season+'&week='+week,{headers:{Authorization:'Bearer '+token}});
-    if(!response.ok)throw Error('NFL schedule unavailable');
-    nflMatchupCache[key]={at:Date.now(),data:await response.json()};
-    try{
-      const meta=await fetch('/api/nfl/player-metadata?season='+season+'&week='+week,{headers:{Authorization:'Bearer '+token}});
-      if(meta.ok){
-        const result=await meta.json();nflPlayerMetaCache[key]={at:Date.now(),data:result};
+    // Schedule and player projections are independent feeds. One failure must
+    // not prevent the other from loading or retrying.
+    if(!scheduleFresh){
+      try{
+        const response=await fetch('/api/nfl/week-matchups?season='+season+'&week='+week,{headers:{Authorization:'Bearer '+token}});
+        if(!response.ok)throw Error('NFL schedule unavailable');
+        nflMatchupCache[key]={at:Date.now(),data:await response.json()};
+      }catch(e){console.warn('NFL matchup metadata:',e.message);}
+    }
+    if(!metadataFresh){
+      try{
+        const meta=await fetch('/api/nfl/player-metadata?season='+season+'&week='+week,{headers:{Authorization:'Bearer '+token}});
+        if(!meta.ok)throw Error('NFL player metadata HTTP '+meta.status);
+        const result=await meta.json();
+        nflPlayerMetaCache[key]={at:Date.now(),data:result};
         const statuses=result.players||{};
-        for(const item of state?.players||[]){
+        for(const item of [...(state?.players||[]),...(espn?.players||[])]){
           const status=statuses[String(item.espnId||String(item.id).replace(/^espn-/,''))]?.injuryStatus;
           if(status&&status!=='UNKNOWN')item.injuryStatus=status;
         }
-        for(const item of espn?.players||[]){
-          const status=statuses[String(item.id)]?.injuryStatus;
-          if(status&&status!=='UNKNOWN')item.injuryStatus=status;
-        }
-      }
-    }catch(e){console.warn('NFL player metadata:',e.message);}
-  }catch(e){console.warn('NFL matchup metadata:',e.message);nflMatchupCache[key]={at:Date.now(),data:{teams:{}}};}
-  finally{nflMatchupPending.delete(key);if((tab==='Matchup'||tab==='Players'||tab==='My Team'||tab==='Home'||tab==='League')&&(tab==='My Team'||tab==='Home'||tab==='League'||selectedMatchupWeek()===week))render();}
+      }catch(e){console.warn('NFL player metadata:',e.message);}
+    }
+  }finally{
+    nflMatchupPending.delete(key);
+    if((tab==='Matchup'||tab==='Players'||tab==='My Team'||tab==='Home'||tab==='League')&&(tab==='My Team'||tab==='Home'||tab==='League'||selectedMatchupWeek()===week))render();
+  }
 }
 function nflPlayerGame(x){
   const week=selectedMatchupWeek(),season=Number(state?.nflDirectorySync?.season||new Date().getFullYear());
@@ -1043,9 +1051,8 @@ function faForecastPlayer(p,week){
   const id=String(p.espnId||String(p.id||'').replace(/^espn-/,''));
   const meta=nflPlayerMetaCache[key]?.data?.players?.[id];
   const feed=weeklyDirectory[id];
-  // Week 11: the missing roster team handshake must not hide a verified bye.
-  const fallbackTeam=season===2026&&Number(week)===11&&String(p.name||'').trim().toLowerCase()==='drake maye'?'NE':'';
-  const team=String(meta?.teamId||p.nflTeamId||p.team||feed?.teamId||feed?.team||fallbackTeam||'').toUpperCase();
+  const directoryPlayer=(espn?.players||[]).find(x=>String(x.id)===id);
+  const team=String(meta?.teamId||p.nflTeamId||directoryPlayer?.nflTeamId||directoryPlayer?.teamId||p.team||directoryPlayer?.team||feed?.teamId||feed?.team||'').toUpperCase();
   const teamId=/^\d+$/.test(team)?team:NFL_TEAM_IDS[team];
   const game=nflMatchupCache[key]?.data?.teams?.[teamId];
   const liveGame=game?.status==='playing'||game?.status==='live';
