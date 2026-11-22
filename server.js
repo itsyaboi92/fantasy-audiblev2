@@ -1564,7 +1564,7 @@ async function api(req,res,route){
   // On-demand read-only game tracker. Never updates scoring, standings or lineups.
   if(req.method==='GET'&&route==='/api/nfl/game-tracker'){
     const id=String(url.searchParams.get('gameId')||'');
-    if(!/^\\d{6,15}$/.test(id))return send(res,400,{error:'Invalid ESPN game ID'});
+    if(!/^\d{6,15}$/.test(id))return send(res,400,{error:'Invalid ESPN game ID'});
     try{
       if(!globalThis.faTrackerCache)globalThis.faTrackerCache=new Map();
       const cache=globalThis.faTrackerCache;
