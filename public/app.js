@@ -182,7 +182,7 @@ function injuryCard(injury){const starter=p(injury.player);if(!starter||starter.
       const healthKey=String(health).toUpperCase().replace(/[\s-]+/g,'_');
       const healthBlocked=['OUT','O','IR','INJURED_RESERVE','INJURY_RESERVE','RESERVE_INJURED','INJURED_RESERVE_DESIGNATED_TO_RETURN','SUSPENDED','SUSPENSION','PUP','PHYSICALLY_UNABLE_TO_PERFORM','NFI','NON_FOOTBALL_INJURY'].includes(healthKey);
       if(healthBlocked||!eligible)return '';
-      return `<div class="row"><div><b>${esc(x.name)}</b> ${injuryLabel(health)}
+      return `<div class="row"><div><b>${esc(lineupChoiceLabel(x))}</b> ${injuryLabel(health)}
         <div class="muted small">${mode==='handcuff'?'Same-team handcuff: future points only':'Later kickoff: full-game points'}</div>
         <div>${faSubRisk(x,starter,mode)}</div></div>
         <button ${eligible?'':'disabled'} onclick='act("/api/substitute",${JSON.stringify({injury:injury.id,bench:x.id})})'>Substitute</button></div>`;}).join('');
