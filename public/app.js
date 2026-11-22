@@ -820,6 +820,22 @@ function rosterMatchupDetails(p){
     <div class="muted small">Projected PPR: ${game?.status==='final'?'—':Number.isFinite(projection)&&projection>=0?fmt(projection)+' est.':'—'} · OPRK: ${rankLabel} · ${strength}</div>
     ${live!==null&&Number.isFinite(live)?`<div class="muted small">Live: ${fmt(live)} pts</div>`:''}`;
 }
+function lineupChoiceLabel(p){
+  const season=Number(state?.nflDirectorySync?.season||new Date().getFullYear());
+  const week=Math.min(18,Math.max(1,Number(state?.week||state?.nflDirectorySync?.currentWeek||1)));
+  const key=season+':'+week;
+  const espnId=String(p.espnId||String(p.id||'').replace(/^espn-/,''));
+  const meta=nflPlayerMetaCache[key]?.data?.players?.[espnId];
+  const projection=meta?.weeklyProjectedPoints;
+  const points=projection==null||!Number.isFinite(Number(projection))?'Proj —':`Proj ${Number(projection).toFixed(1)}`;
+  const team=String(meta?.teamId||p.nflTeamId||p.team||'').toUpperCase();
+  const teamId=/^\d+$/.test(team)?team:NFL_TEAM_IDS[team];
+  const game=nflMatchupCache[key]?.data?.teams?.[teamId];
+  const kickoff=game?.kickoff&&Number.isFinite(Date.parse(game.kickoff))
+    ?new Date(game.kickoff).toLocaleString(undefined,{weekday:'short',hour:'numeric',minute:'2-digit'})
+    :game?.status==='bye'?'BYE':'Kickoff —';
+  return `${p.name} (${p.pos}) · ${points} · ${kickoff}`;
+}
 function lineupManager(mine){
   ensureLineupDraft(mine);
   const roster=state.settings?.roster||{bench:7,ir:1};
@@ -837,7 +853,7 @@ function lineupManager(mine){
       <select style="max-width:70%;min-width:170px" onchange="updateLineupSelection(${jsAttr(key)},this.value)">
         <option value="" ${!selected?'selected':''}>Empty starting slot</option>
         ${choices.map(p=>`<option value="${esc(p.id)}" ${selected===p.id?'selected':''}>
-          ${esc(p.name)} (${esc(p.pos)})</option>`).join('')}
+          ${esc(lineupChoiceLabel(p))}</option>`).join('')}
       </select></div>`;
   }).join('');
   const bench=mine.filter(p=>p.slot==='BENCH');
