@@ -1657,13 +1657,25 @@ async function tradeCounter(id){
     tradeGiving=[];tradeReceiving=[];await loadTrades();toast('Counteroffer sent');}
   catch(e){toast(e.message);}
 }
-function changeTab(next){closeMatchupGameStats();if(next==='Matchup'&&tab!=='Matchup'){matchupWeek=null;matchupAutoWeek=null;matchupIndex=0;}tab=next;render();if(tab==='Draft')syncServerClock();
+function changeTab(next){
+  if(tab==='My Team'&&next!=='My Team'&&lineupDirty){
+    if(!confirm('You have unsaved lineup changes. Leave My Team without saving?'))return;
+    lineupDraft=null;
+    lineupDraftSignature='';
+    lineupDirty=false;
+  }
+  closeMatchupGameStats();if(next==='Matchup'&&tab!=='Matchup'){matchupWeek=null;matchupAutoWeek=null;matchupIndex=0;}tab=next;render();if(tab==='Draft')syncServerClock();
   if(tab==='Draft'||tab==='Players')loadESPN();
   if(tab==='My Team'){loadWeeklyDirectory();fetchNFLMatchups(Math.min(18,Math.max(1,Number(state?.week||state?.nflDirectorySync?.currentWeek||1))));}
   if(tab==='Players'){loadWeeklyDirectory();fetchNFLMatchups(Math.min(18,Math.max(1,Number(state?.week||state?.nflDirectorySync?.currentWeek||selectedMatchupWeek()))));}
   if(tab==='Matchup'){loadWeeklyDirectory();fetchNFLMatchups(selectedMatchupWeek());}
   if(tab==='Players'||tab==='My Waivers')loadTransactions();
   if(tab==='Locker Room')loadChat();if(tab==='League'){loadTrades();loadWeeklyDirectory();fetchNFLMatchups(Math.min(18,Math.max(1,Number(state?.week||state?.nflDirectorySync?.currentWeek||1))));}}
+window.addEventListener('beforeunload',event=>{
+  if(tab!=='My Team'||!lineupDirty)return;
+  event.preventDefault();
+  event.returnValue='';
+});
 function logout(){localStorage.removeItem('audibleToken');location.reload();}
 function authForm(){$('tabs').innerHTML='';$('connection').textContent='● Sign in';
   $('app').innerHTML=`<section class="card" style="max-width:500px;margin:auto"><h1>Fantasy Audible</h1>
