@@ -571,16 +571,53 @@ function editorialEdition(s,kind,week){
     }
   }else if(kind==='outlook'){
     if(!fixtures.length)return null;
-    lines.push('Sunday check-in: Thursday results are in the mix. These are snapshots, not final predictions; remaining games can change everything.');
+    const projected=id=>{
+      const starters=(s.players||[]).filter(p=>p.owner===id&&!['BENCH','IR'].includes(p.slot));
+      const values=starters.map(p=>({name:p.name,points:p.weeklyProjectedPoints})).filter(p=>p.points!==null&&p.points!==undefined&&Number.isFinite(Number(p.points)));
+      return {total:values.reduce((n,p)=>n+Number(p.points),0),complete:starters.length>0&&values.length===starters.length,
+        top:values.sort((a,b)=>Number(b.points)-Number(a.points))[0]};
+    };
+    let reported=0,unreported=0;
     for(const f of fixtures){
-      const m=ledger[f.id];
-      if(m && Number.isFinite(m.homeScore) && Number.isFinite(m.awayScore)){
-        const leader=m.homeScore===m.awayScore?'Nobody':editorialTeam(s,m.homeScore>m.awayScore?f.home:f.away);
-        lines.push(`${editorialTeam(s,f.home)} ${m.homeScore.toFixed(1)} – ${editorialTeam(s,f.away)} ${m.awayScore.toFixed(1)} (current recorded points; ${m.status==='final'?'final':'provisional'}). ${leader==='Nobody'?'Dead even for now.':`${leader} is ahead for now.`} The remaining slate still matters.`);
-      }else lines.push(`${editorialTeam(s,f.home)} vs ${editorialTeam(s,f.away)}: no current matchup scores recorded yet. Sunday is where the plot thickens.`);
+      const h=editorialTeam(s,f.home),a=editorialTeam(s,f.away),m=ledger[f.id];
+      if(!m||!Number.isFinite(m.homeScore)||!Number.isFinite(m.awayScore)){
+        unreported++;
+        lines.push(`${h} vs ${a}: Live scoring hasn't reached this matchup yet. No score-based prediction until it does.`);
+        continue;
+      }
+      reported++;
+      const hs=m.homeScore,as=m.awayScore,delta=Math.abs(hs-as),leader=hs>as?h:as>hs?a:null;
+      const hp=projected(f.home),ap=projected(f.away);
+      const score=`${h} ${hs.toFixed(1)} – ${a} ${as.toFixed(1)}.`;
+      if(m.status==='final'){
+        lines.push(`${score} Final. ${leader?`${leader} wins by ${delta.toFixed(1)}.`:'The matchup finishes tied.'}`);
+        continue;
+      }
+      const observations=[];
+      if(hp.complete&&ap.complete){
+        const diff=hp.total-ap.total;
+        const favorite=diff>0?h:diff<0?a:null;
+        const projectedGap=Math.abs(diff);
+        if(leader&&favorite&&leader!==favorite)
+          observations.push(`${leader} leads the live scoreboard, but ${favorite} entered with the higher full-lineup projection (${hp.total.toFixed(1)}–${ap.total.toFixed(1)}). That's a comeback storyline, not a settled result.`);
+        else if(projectedGap<5)
+          observations.push(`Pre-game projections were separated by just ${projectedGap.toFixed(1)} points. This matchup was built to be close.`);
+        else
+          observations.push(`${favorite||'Neither side'} ${favorite?'had the projected edge':'was favored'} before kickoff (${hp.total.toFixed(1)}–${ap.total.toFixed(1)}).`);
+      }
+      if(hs===0&&as===0)observations.push('Neither side has recorded points yet; calling a winner would be theater.');
+      else if(hs===0||as===0)observations.push(`${hs===0?h:a} is still scoreless in the recorded feed. That alone does not mean its lineup has finished playing.`);
+      else if(delta<5)observations.push(`Just ${delta.toFixed(1)} points separate them on the live board.`);
+      else if(delta>=40)observations.push(`A ${delta.toFixed(1)}-point live gap is a serious hole, though unplayed starters could still change the picture.`);
+      else observations.push(`${leader} has a ${delta.toFixed(1)}-point cushion in recorded scoring.`);
+      const star=[hp.top&&{...hp.top,team:h},ap.top&&{...ap.top,team:a}].filter(Boolean).sort((x,y)=>Number(y.points)-Number(x.points))[0];
+      if(star&&observations.length<2)observations.push(`${star.name} (${star.team}) carries a ${Number(star.points).toFixed(1)}-point weekly projection.`);
+      lines.push(`${score} ${observations.slice(0,2).join(' ')}`);
     }
+    if(!reported&&unreported)lines.unshift('The live scoreboard is still waiting on results. No manufactured leads today.');
+
   }
-  return {id:`${kind}-${week}`,kind,week,title,lines,...(kind==='preview'?{commentaryVersion:3}:{}),publishedAt:new Date().toISOString()};
+  return {id:`${kind}-${week}`,kind,week,title,lines,...(['preview','outlook'].includes(kind)?{commentaryVersion:kind==='outlook'?4:3}:{}),publishedAt:new Date().toISOString()};
 }
 function easternEditorialNow(now=new Date()){
   const parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',weekday:'short',hour:'2-digit',hourCycle:'h23'}).formatToParts(now);
@@ -598,8 +635,8 @@ async function publishEditorial(){
     const candidateWeeks=[current,Math.max(1,current-1)];
     // Upgrade already-published bland previews in place, preserving their IDs.
     // Existing Locker Room announcements are intentionally not duplicated.
-    const stalePreview=(preview.editorial||[]).some(e=>e.kind==='preview'&&
-      !(e.commentaryVersion>=3));
+    const stalePreview=(preview.editorial||[]).some(e=>
+      (e.kind==='preview'&&!(e.commentaryVersion>=3))||(e.kind==='outlook'&&!(e.commentaryVersion>=4)));
 
     const readyRecaps=candidateWeeks.filter(week=>{
       const fixtures=preview.frozenMatchupSchedule?.[week]||[];
@@ -612,9 +649,9 @@ async function publishEditorial(){
       s.editorial ||= [];
       for(let i=0;i<s.editorial.length;i++){
         const old=s.editorial[i];
-        if(old.kind!=='preview'||old.commentaryVersion>=3)continue;
-        const revised=editorialEdition(s,'preview',old.week);
-        if(revised)s.editorial[i]={...revised,commentaryVersion:3,publishedAt:old.publishedAt,updatedAt:new Date().toISOString()};
+        if(!['preview','outlook'].includes(old.kind)||old.commentaryVersion>=(old.kind==='outlook'?4:3))continue;
+        const revised=editorialEdition(s,old.kind,old.week);
+        if(revised)s.editorial[i]={...revised,commentaryVersion:old.kind==='outlook'?4:3,publishedAt:old.publishedAt,updatedAt:new Date().toISOString()};
       }
       const nowWeek=editorialWeek(s);
       for(const week of [nowWeek,Math.max(1,nowWeek-1)]){
