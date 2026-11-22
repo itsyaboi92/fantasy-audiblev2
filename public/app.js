@@ -1193,6 +1193,17 @@ function matchupView(){
   .fa-week{display:flex;align-items:center;justify-content:center;gap:12px;margin:18px auto 22px;width:100%;flex-wrap:nowrap}.fa-week label{display:flex;align-items:center;gap:8px;white-space:nowrap}.fa-week select{padding:8px;background:#202d43;color:inherit;border-radius:8px}
   .fa-match-strip{display:flex;overflow-x:auto;gap:8px;padding:10px 0 16px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch}
   .fa-match-pill{flex:0 0 auto;max-width:210px;white-space:normal;scroll-snap-align:center;min-height:50px}.fa-match-pill.active{outline:2px solid #66da8c}
+  .fa-match-pill .fa-pill-teams{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:8px;width:100%}
+  .fa-match-pill .fa-pill-team{display:flex;align-items:center;justify-content:center;gap:7px;min-width:0;overflow-wrap:anywhere;text-align:center}
+  .fa-match-pill .fa-pill-vs{font-size:12px;opacity:.8}
+  @media (orientation:landscape) and (min-width:700px){
+    .fa-match-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));overflow-x:visible;align-items:stretch}
+    .fa-match-pill{max-width:none;width:100%;min-width:0;min-height:72px;padding:12px 10px}
+    .fa-match-nav{display:grid;grid-template-columns:1fr auto 1fr}
+    .fa-match-nav button:first-child{justify-self:start}
+    .fa-match-nav button:last-child{justify-self:end}
+    .fa-head{grid-template-columns:minmax(0,1fr) 48px minmax(0,1fr)}
+  }
   .fa-match-surface{touch-action:pan-y;overflow:hidden}.fa-head{display:grid;grid-template-columns:minmax(0,1fr) 36px minmax(0,1fr);align-items:center;text-align:center;gap:6px;padding:12px 0 20px}
   .fa-head b{overflow-wrap:anywhere}.fa-total{font-size:32px;font-weight:800;margin:8px 0 3px;font-variant-numeric:tabular-nums}
   .fa-match-row{display:grid;grid-template-columns:minmax(0,1fr) 44px minmax(0,1fr);gap:5px;align-items:stretch;border-top:1px solid #384357;min-height:72px}
@@ -1204,7 +1215,7 @@ function matchupView(){
   @media(max-width:420px){.fa-head .fa-total{font-size:26px}.fa-player{font-size:12px}.fa-position{font-size:11px}}
   </style>
   <h1>Week ${week} Matchups</h1><div class="fa-week"><button onclick="setMatchupWeek(${week-1})" ${week===1?'disabled':''}>‹</button><label>NFL Week <select onchange="setMatchupWeek(this.value)">${Array.from({length:18},(_,i)=>`<option value="${i+1}" ${week===i+1?'selected':''}>${i+1}</option>`).join('')}</select></label><button onclick="setMatchupWeek(${week+1})" ${week===18?'disabled':''}>›</button></div>
-  <div class="fa-match-strip">${games.map((g,i)=>`<button class="fa-match-pill ${i===matchupIndex?'active':''}" onclick="selectMatchup(${i})">${teamPhoto(g.home,24)} ${esc(m(g.home)?.team||g.home)} vs ${teamPhoto(g.away,24)} ${esc(m(g.away)?.team||g.away)}</button>`).join('')}</div>
+  <div class="fa-match-strip">${games.map((g,i)=>`<button class="fa-match-pill ${i===matchupIndex?'active':''}" onclick="selectMatchup(${i})"><span class="fa-pill-teams"><span class="fa-pill-team">${teamPhoto(g.home,24)} <span>${esc(m(g.home)?.team||g.home)}</span></span><span class="fa-pill-vs">vs</span><span class="fa-pill-team">${teamPhoto(g.away,24)} <span>${esc(m(g.away)?.team||g.away)}</span></span></span></button>`).join('')}</div>
   <section class="card fa-match-surface" ontouchstart="matchupSwipeStart(event)" ontouchend="matchupSwipeEnd(event)">
     <div class="fa-match-nav"><button onclick="selectMatchup(${matchupIndex-1})">‹ Previous</button><span class="muted small">Matchup ${matchupIndex+1} of ${games.length}</span><button onclick="selectMatchup(${matchupIndex+1})">Next ›</button></div>
     <div class="fa-head"><div>${teamPhoto(game.home,54)}<br><b>${esc(left?.team||'Team')}</b><div class="fa-total">${total(game.home,'home')}</div></div><span>VS</span><div>${teamPhoto(game.away,54)}<br><b>${esc(right?.team||'Team')}</b><div class="fa-total">${total(game.away,'away')}</div></div></div>
