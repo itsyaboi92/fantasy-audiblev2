@@ -1192,13 +1192,13 @@ function matchupView(){
   .fa-favor-needle{position:absolute;top:-7px;height:29px;width:3px;border-radius:3px;background:white;box-shadow:0 0 6px #fff;transform:translateX(-50%);transition:left .7s ease}
   .fa-week{display:flex;align-items:center;justify-content:center;gap:12px;margin:18px auto 22px;width:100%;flex-wrap:nowrap}.fa-week label{display:flex;align-items:center;gap:8px;white-space:nowrap}.fa-week select{padding:8px;background:#202d43;color:inherit;border-radius:8px}
   .fa-match-strip{display:flex;overflow-x:auto;gap:8px;padding:10px 0 16px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch}
-  .fa-match-pill{flex:0 0 auto;max-width:210px;white-space:normal;scroll-snap-align:center;min-height:50px}.fa-match-pill.active{outline:2px solid #66da8c}
+  .fa-match-pill{flex:0 0 340px;max-width:calc(100vw - 36px);white-space:normal;scroll-snap-align:center;min-height:60px}.fa-match-pill.active{outline:2px solid #66da8c}
   .fa-match-pill .fa-pill-teams{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:8px;width:100%}
-  .fa-match-pill .fa-pill-team{display:flex;align-items:center;justify-content:center;gap:7px;min-width:0;overflow-wrap:anywhere;text-align:center}
+  .fa-match-pill .fa-pill-team{display:flex;align-items:center;justify-content:center;gap:5px;min-width:0;text-align:center;font-size:12px;line-height:1.25}.fa-match-pill .fa-pill-team>span:last-child{overflow-wrap:normal;word-break:normal;hyphens:none}.fa-match-pill .fa-pill-team>span:first-child{flex-shrink:0}
   .fa-match-pill .fa-pill-vs{font-size:12px;opacity:.8}
   @media (orientation:landscape) and (min-width:700px){
     .fa-match-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));overflow-x:visible;align-items:stretch}
-    .fa-match-pill{max-width:none;width:100%;min-width:0;min-height:72px;padding:12px 10px}
+    .fa-match-pill{flex-basis:auto;max-width:none;width:100%;min-width:0;min-height:72px;padding:12px 8px}
     .fa-match-nav{display:grid;grid-template-columns:1fr auto 1fr}
     .fa-match-nav button:first-child{justify-self:start}
     .fa-match-nav button:last-child{justify-self:end}
