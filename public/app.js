@@ -1010,8 +1010,56 @@ function matchupPlayerCell(x){
 }
 // v31: Game-specific player boxscore overlay, independent of season history.
 let fa31StatsTimer=null,fa31Selected=null,fa31Request=0;
+let faTrackerTimer=null,faTrackerAbort=null,faTrackerRequest=0,faTrackerGameId=null;
+function closeLiveFieldTracker(){
+  clearTimeout(faTrackerTimer);faTrackerTimer=null;
+  if(faTrackerAbort)faTrackerAbort.abort();
+  faTrackerAbort=null;faTrackerRequest++;faTrackerGameId=null;
+}
+function toggleLiveFieldTracker(details){
+  if(!details.open){closeLiveFieldTracker();return;}
+  const gameId=fa31Selected?.gameId||faTrackerGameId;
+  if(!gameId){details.open=false;return;}
+  faTrackerGameId=String(gameId);refreshLiveFieldTracker();
+}
+function renderLiveFieldTracker(data){
+  const pos=Number(data.location);
+  const valid=data.location!==null&&Number.isFinite(pos)&&pos>=0&&pos<=100;
+  const trail=(data.driveTrail||[]).filter(x=>typeof x==='number'&&x>=0&&x<=100);
+  const x=n=>20+n*3;
+  const path=trail.length>1?'<polyline points="'+trail.map((n,i)=>x(n)+','+(i%2?53:49)).join(' ')+'" stroke="#ffd66d" stroke-width="3" fill="none" stroke-linejoin="round"/>':'';
+  const marks=Array.from({length:11},(_,i)=>'<line x1="'+(20+i*30)+'" y1="8" x2="'+(20+i*30)+'" y2="92" stroke="white" stroke-opacity=".32"/><text x="'+(20+i*30)+'" y="21" fill="white" font-size="9" text-anchor="middle">'+(i*10)+'</text>').join('');
+  const ball=valid?'<circle cx="'+x(pos)+'" cy="50" r="7" fill="#fff" stroke="#ffd66d" stroke-width="3"/>':'';
+  const field='<svg viewBox="0 0 340 100" style="width:100%;display:block;background:#185c3b;border-radius:8px" role="img" aria-label="Field position from own goal line to opponent goal line">'+marks+path+ball+'<text x="24" y="85" font-size="9" fill="white">OWN</text><text x="316" y="85" font-size="9" text-anchor="end" fill="white">OPP</text></svg>';
+  const last=data.lastPlay;
+  return '<div style="display:grid;gap:10px;padding:6px 0 14px">'+field+
+    '<div><b>'+esc(data.possession||'Possession unavailable')+'</b> · '+(valid?'Yard '+esc(String(Math.round(pos)))+' from own goal':'Field position unavailable')+
+    (data.period?' · Q'+esc(String(data.period)):'')+(data.clock?' · '+esc(data.clock):'')+'</div>'+
+    '<div><b>Last play</b><p style="margin:4px 0">'+esc(last?.description||'No play reported yet.')+'</p>'+
+    (last?.downDistance?'<span>'+esc(last.downDistance)+'</span>':'')+'</div>'+
+    '<div class="muted small">'+esc(data.notice||'')+' · ESPN unofficial live feed</div></div>';
+}
+async function refreshLiveFieldTracker(){
+  const details=document.getElementById('faLiveTracker'),content=document.getElementById('faLiveFieldContent');
+  if(!details?.open||!content||!fa31Selected||!faTrackerGameId||document.hidden)return;
+  clearTimeout(faTrackerTimer);
+  if(faTrackerAbort)faTrackerAbort.abort();
+  const request=++faTrackerRequest,controller=new AbortController();faTrackerAbort=controller;
+  try{
+    const response=await fetch('/api/nfl/game-tracker?gameId='+encodeURIComponent(faTrackerGameId),{headers:{Authorization:'Bearer '+token},cache:'no-store',signal:controller.signal});
+    const data=await response.json();if(!response.ok)throw Error(data.details||data.error||'Tracker unavailable');
+    if(request!==faTrackerRequest||!document.getElementById('faLiveTracker')?.open)return;
+    content.innerHTML=renderLiveFieldTracker(data);
+    if(data.status==='playing')faTrackerTimer=setTimeout(refreshLiveFieldTracker,25000);
+  }catch(e){
+    if(controller.signal.aborted||request!==faTrackerRequest)return;
+    content.innerHTML='<p>'+esc(e.message)+'</p><button onclick="refreshLiveFieldTracker()">Retry tracker</button>';
+  }
+}
+document.addEventListener('visibilitychange',()=>{if(document.hidden){clearTimeout(faTrackerTimer);faTrackerTimer=null;if(faTrackerAbort)faTrackerAbort.abort();}else if(document.getElementById('faLiveTracker')?.open)refreshLiveFieldTracker();});
 function closeMatchupGameStats(){
   fa31Selected=null;fa31Request++;clearTimeout(fa31StatsTimer);fa31StatsTimer=null;
+  closeLiveFieldTracker();
   document.getElementById('fa31GameModal')?.remove();
 }
 function openMatchupGameStats(id){
@@ -1033,12 +1081,15 @@ async function loadMatchupGameStats(){
     const data=await response.json();if(!response.ok)throw Error(data.details||data.error||'Game stats unavailable');
     if(request!==fa31Request||!fa31Selected)return;
     const game=data.game;
+    if(game?.id)fa31Selected.gameId=String(game.id);
     const scoreRow=game?.teams?.map(t=>esc(t.abbreviation)+' '+esc(t.score)).join(' · ')||'';
     const time=game?.kickoff?new Date(game.kickoff).toLocaleString(undefined,{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}):'Unavailable';
     const title=`<h2 style="margin:8px 0">${esc(data.player?.name||'Player')}</h2><div class="muted small">${esc(data.player?.position||'')} · ${esc(game?.team||'')} ${game?.homeAway==='home'?'vs':'@'} ${esc(game?.opponent||'')}</div><p class="muted small">${esc(game?.status||data.status||'Unavailable')} · ${esc(time)}${scoreRow?' · '+scoreRow:''}</p>`;
     const groupHtml=(data.groups||[]).map(g=>`<section class="fa31-group"><h3>${esc(g.name.charAt(0).toUpperCase()+g.name.slice(1))}</h3>${g.rows.map(r=>`<div class="fa31-stat"><span>${esc(r.label)}</span><b>${esc(r.value)}</b></div>`).join('')}</section>`).join('');
     const breakdown=(data.breakdown||[]).map(r=>`<div class="fa31-stat"><span>${esc(r.label)}${r.bracket?'':` (${esc(r.quantity)} × ${esc(r.rate)})`}</span><b>${fmt(r.points)}</b></div>`).join('');
-    content.innerHTML=title+(data.status==='available'?`<div class="fa31-points">${fmt(data.points)} <span>provisional fantasy pts</span></div>${data.statDetails?defenseStatTable(data.statDetails):groupHtml}<section class="fa31-group"><h3>Fantasy scoring breakdown</h3>${breakdown||'<p class="muted small">No supported scoring events yet.</p>'}</section>${data.unsupported?.length?`<p class="muted small">Unverified categories: ${esc(data.unsupported.join(', '))}</p>`:''}`:`<p class="muted">${esc(data.notice||'No statistics available yet.')}</p>`)+`<p class="muted small">${esc(data.notice||'Unofficial ESPN feed; fantasy ledger remains authoritative.')}</p><button onclick="loadMatchupGameStats()">Refresh stats</button>`;
+    const oldTracker=document.getElementById('faLiveTracker');const trackerWasOpen=!!oldTracker?.open;
+    content.innerHTML=title+(data.status==='available'?`<div class="fa31-points">${fmt(data.points)} <span>provisional fantasy pts</span></div>${data.statDetails?defenseStatTable(data.statDetails):groupHtml}<section class="fa31-group"><h3>Fantasy scoring breakdown</h3>${breakdown||'<p class="muted small">No supported scoring events yet.</p>'}</section>${data.unsupported?.length?`<p class="muted small">Unverified categories: ${esc(data.unsupported.join(', '))}</p>`:''}`:`<p class="muted">${esc(data.notice||'No statistics available yet.')}</p>`)+`<p class="muted small">${esc(data.notice||'Unofficial ESPN feed; fantasy ledger remains authoritative.')}</p>${game?.id?`<details id="faLiveTracker" ${trackerWasOpen?'open':''} ontoggle="toggleLiveFieldTracker(this)"><summary style="cursor:pointer;font-weight:700;padding:12px 0">🏈 Live Field Tracker</summary><div id="faLiveFieldContent" class="muted small">Expand to load the current drive.</div></details>`:''}<button onclick="loadMatchupGameStats()">Refresh stats</button>`;
+    if(game?.id&&trackerWasOpen){faTrackerGameId=String(game.id);refreshLiveFieldTracker();}
     if(game?.status==='playing')fa31StatsTimer=setTimeout(()=>{if(fa31Selected&&!document.hidden)loadMatchupGameStats();},25000);
   }catch(e){if(request===fa31Request&&fa31Selected&&content)content.innerHTML=`<p>${esc(e.message)}</p><button onclick="loadMatchupGameStats()">Retry</button>`;}
 }
