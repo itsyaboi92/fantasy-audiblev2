@@ -89,7 +89,23 @@ function nflAffiliationLabel(teamId){
   if(teamId===null||teamId===undefined||teamId==='')return 'NFL team unavailable';
   return 'NFL team '+String(teamId);
 }
-function playerRow(x){return `<div class="row"><div><b>${esc(x.name)}</b><div class="muted small">
+// NFL club badges are deliberately separate from fantasy-manager avatars.
+function nflClubBadge(player,size=17){
+  if(!player)return '';
+  const raw=player.nflTeamId??player.teamId??player.teamAbbr??player.team;
+  const value=String(raw??'').trim().toUpperCase();
+  const id=/^\d+$/.test(value)?value:NFL_TEAM_IDS[value];
+  if(!id||id==='0')return '';
+  const label=Object.keys(NFL_TEAM_IDS).find(k=>NFL_TEAM_IDS[k]===String(id))||value;
+  return `<img class="fa-nfl-badge" src="https://a.espncdn.com/i/teamlogos/nfl/500/scoreboard/${esc(label.toLowerCase())}.png" alt="${esc(label)}" title="${esc(label)}" width="${size}" height="${size}" loading="lazy" onerror="this.style.display='none'">`;
+}
+function nflPlayerName(player,size=17){
+  return `<span class="fa-nfl-player-name">${nflClubBadge(player,size)}<span>${esc(player?.name||'Player')}</span></span>`;
+}
+function nflPlayerByName(name){
+  return espn?.players?.find(x=>x.name===name)||state?.players?.find(x=>x.name===name)||null;
+}
+function playerRow(x){return `<div class="row"><div><b>${nflPlayerName(x)}</b><div class="muted small">
   ${esc(nflAffiliationLabel(x.nflTeamId??x.team))} · ${esc(x.pos)} · ${esc(x.slot)} · ${esc(x.status)}</div></div><b>${fmt(score(x))}</b></div>`;}
 async function apiPost(route,body){const response=await fetch(route,{method:'POST',headers:{
   'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify(body)});
@@ -426,7 +442,7 @@ function draftBoard(){const d=draftData();if(!d.order.length)return card('Draft 
     `<div class="row"><div><b>#${d.picks.length+i+1}</b> ${esc(m(pick.manager)?.team||pick.manager)}
     <div class="muted small">Round ${pick.round}</div></div>${i===0?'<b>ON THE CLOCK</b>':''}</div>`).join('')||'<p>Draft complete.</p>');}
 function draftHistory(){const picks=[...draftData().picks].reverse();return card('Draft history',picks.length?picks.map(x=>
-  `<div class="row"><div><b>#${x.overall} ${esc(x.playerName)}</b><div class="muted small">
+  `<div class="row"><div><b>#${x.overall} ${nflPlayerName(nflPlayerByName(x.playerName)||{name:x.playerName})}</b><div class="muted small">
   ${esc(m(x.manager)?.team||x.manager)} · ${esc(x.position)} · Round ${x.round}${x.automatic?' · Auto-pick':''}
   </div></div><b>${x.rank==null?'—':'#'+x.rank}</b></div>`).join(''):'<p>No players drafted yet.</p>');}
 async function loadTransactions(){
@@ -517,7 +533,7 @@ function playerTable(){if(!espn)return card('ESPN player data',`<p>${esc(espnErr
     ${transactionsOpen?(transactionError?`<p>${esc(transactionError)} <button onclick="loadTransactions()">Retry</button></p>`:
       `<p class="muted small">Free agents: Add immediately · Locked: game in progress · Waivers: claim after final. Waiver priority: ${esc((transactionData?.priority||[]).join(' → ')||'Not initialized')}</p>`):''}
     ${playerProfileCard()}${breakdownCard()}<div id="draftPlayerRows">${players.map(x=>{const legal=canDraftPosition(x.position);
-      return `<div class="row"><div><b>${x.rank==null?'—':'#'+x.rank} <button type="button" style="border:0;background:transparent;padding:0;text-decoration:underline;font:inherit;color:inherit;cursor:pointer" onclick='openPlayerProfile(${jsAttr(String(x.id))})'>${esc(x.name)}</button></b>
+      return `<div class="row"><div><b>${x.rank==null?'—':'#'+x.rank} <button type="button" style="border:0;background:transparent;padding:0;text-decoration:underline;font:inherit;color:inherit;cursor:pointer" onclick='openPlayerProfile(${jsAttr(String(x.id))})'>${nflPlayerName(x)}</button></b>
         <div class="muted small">${esc(x.position)} · ${esc(nflAffiliationLabel(x.nflTeamId))} · ESPN ADP ${x.averageDraftPosition==null?'—':fmt(x.averageDraftPosition)}</div>
         ${x.position==='D/ST'?'':injuryLabel(x.injuryStatus)}</div><div style="text-align:right"><b>${x.projectedPoints==null?'—':fmt(x.projectedPoints)}</b>
         <div class="muted small">Season projected PPR</div>
@@ -858,12 +874,12 @@ function lineupManager(mine){
   }).join('');
   const bench=mine.filter(p=>p.slot==='BENCH');
   const ir=mine.filter(p=>p.slot==='IR');
-  const benchRows=bench.map(p=>`<div class="row"><span>${esc(p.name)} · ${esc(p.pos)}
+  const benchRows=bench.map(p=>`<div class="row"><span>${nflPlayerName(p)} · ${esc(p.pos)}
     ${injuryLabel(p.injuryStatus)}${rosterMatchupDetails(p)}</span>
     ${['OUT','IR','INJURED_RESERVE','INJURY_RESERVE','PUP','NFI'].includes(String(p.injuryStatus||'').toUpperCase())?
       `<button onclick="moveToSection(${jsAttr(p.id)},'IR')">Move to IR</button>`:''}
     ${draftData().status==='completed'?`<button onclick="dropRosterPlayer(${jsAttr(p.id)})">Drop</button>`:''}</div>`).join('');
-  const irRows=ir.map(p=>`<div class="row"><span>${esc(p.name)} · ${esc(p.pos)}
+  const irRows=ir.map(p=>`<div class="row"><span>${nflPlayerName(p)} · ${esc(p.pos)}
     ${injuryLabel(p.injuryStatus)}${rosterMatchupDetails(p)}</span>
     <button onclick="moveToSection(${jsAttr(p.id)},'BENCH')">Move to bench</button></div>`).join('');
   return card('Set starting lineup',`<div class="actions"><button onclick="optimizeProjectedLineup()" ${lineupSaving?'disabled':''}>⚡ Maximize Projected Points</button></div><p class="muted small">Preview an optimized starting lineup using available weekly projections. Locked players remain in place. Confirm the preview, then save to apply.</p><p class="muted small">Choose all your starters, then save once. Selecting a player in a different slot removes their earlier selection. Game locks are enforced by the server.</p>
@@ -973,7 +989,7 @@ function matchupPlayerCell(x){
   }):null;
   const resolvedEspnId=String(defenseDirectoryPlayer?.id||directoryPlayer?.id||rawEspnId);
   const clickable=!!resolvedEspnId&&(!!defenseDirectoryPlayer||!!directoryPlayer||isDefense||/^\d{1,12}$/.test(resolvedEspnId));
-  const name=clickable?`<button class="fa-match-player-link" onclick='openMatchupGameStats(${jsAttr(resolvedEspnId)})'>${esc(x.name)}</button>`:`<b>${esc(x.name)}</b>`;
+  const name=clickable?`<button class="fa-match-player-link" onclick='openMatchupGameStats(${jsAttr(resolvedEspnId)})'>${nflPlayerName(x)}</button>`:`<b>${nflPlayerName(x)}</b>`;
   const {game,loaded,verified}=nflPlayerGame(x);
   const injury=String(verified?.injuryStatus||directoryPlayer?.injuryStatus||x.injuryStatus||'').toUpperCase();
   const designation=({QUESTIONABLE:'Q',DOUBTFUL:'D',OUT:'O',INJURED_RESERVE:'IR',INJURY_RESERVE:'IR',IR:'IR',PROBABLE:'P'})[injury]||'';
@@ -1173,7 +1189,7 @@ function matchupView(){
   const rightPlayers=isCurrent?matchupStarters(game.away):
     historical&&recorded?.awayLineup?lineupBySlot(recorded.awayLineup.map(p=>({...p,_frozenWeek:week}))):
     week>current?futurePreview(matchupStarters(game.away)):[];
-  const cells=STARTER_ORDER.map((slot,i)=>`<div class="fa-match-row"><div class="fa-player">${leftPlayers[i]?(week>current?`<b>${esc(leftPlayers[i].name)}</b><div class="muted small">Projected starter · 0.0 actual</div>`:matchupPlayerCell(leftPlayers[i])):'<span class="muted">Open slot</span>'}</div><div class="fa-position">${slot}</div><div class="fa-player fa-right">${rightPlayers[i]?(week>current?`<b>${esc(rightPlayers[i].name)}</b><div class="muted small">Projected starter · 0.0 actual</div>`:matchupPlayerCell(rightPlayers[i])):'<span class="muted">Open slot</span>'}</div></div>`).join('');
+  const cells=STARTER_ORDER.map((slot,i)=>`<div class="fa-match-row"><div class="fa-player">${leftPlayers[i]?(week>current?`<b>${nflPlayerName(leftPlayers[i])}</b><div class="muted small">Projected starter · 0.0 actual</div>`:matchupPlayerCell(leftPlayers[i])):'<span class="muted">Open slot</span>'}</div><div class="fa-position">${slot}</div><div class="fa-player fa-right">${rightPlayers[i]?(week>current?`<b>${nflPlayerName(rightPlayers[i])}</b><div class="muted small">Projected starter · 0.0 actual</div>`:matchupPlayerCell(rightPlayers[i])):'<span class="muted">Open slot</span>'}</div></div>`).join('');
   const status=recorded?.status==='final'?'Final':week>current?'Upcoming':week<current?'Past week · provisional':(Object.values(nflMatchupCache[(Number(state.nflDirectorySync?.season||new Date().getFullYear()))+':'+week]?.data?.teams||{}).some(g=>g.status==='playing')?'Live / provisional':'Upcoming / awaiting kickoff');
   const total=(id,side)=>recorded?.status==='final'?fmt(Number(recorded[side+'Score'])||0):
     recorded?fmt((side==='home'?leftPlayers:rightPlayers).reduce((sum,p)=>sum+matchupActualPoints(p,week),0)):
@@ -1450,7 +1466,8 @@ function postseasonView(){
  '<p class="muted small">Clinch and elimination use conservative bounds based on verified finals and complete regular-season schedules. Missing data remains In the hunt.</p>';
 }
 
-function render(){if(!state||!manager)return;const mine=state.players.filter(x=>x.owner===manager),myTeam=m(manager);
+function render(){if(!state||!manager)return;if(!document.getElementById('fa-nfl-badge-style')){const style=document.createElement('style');style.id='fa-nfl-badge-style';style.textContent='.fa-nfl-player-name{display:inline-flex;align-items:center;gap:4px;vertical-align:middle;max-width:100%;min-width:0}.fa-nfl-badge{display:inline-block;flex:none;width:17px;height:17px;object-fit:contain;vertical-align:middle}.fa-match-player-title .fa-nfl-player-name{justify-content:inherit}.fa-nfl-player-name>span{min-width:0;overflow-wrap:normal;word-break:normal}';document.head.appendChild(style);}
+  const mine=state.players.filter(x=>x.owner===manager),myTeam=m(manager);
   if(!myTeam)return;
   const pendingInjuries=(state.injuries||[]).filter(i=>i.active&&state.players.some(p=>p.id===i.player&&p.owner===manager));
   if(!document.getElementById('fa-injury-priority-style')){
@@ -1470,7 +1487,7 @@ function render(){if(!state||!manager)return;const mine=state.players.filter(x=>
     ${card('Recent activity',state.transactions.slice(0,8).map(t=>`<div class="row"><span>${esc(t.details)}</span></div>`).join('')||'<p>No activity yet.</p>')}<p class="muted small" style="text-align:center;opacity:.7">Fantasy Audible · ${esc(faCurrentBuild)}</p>`;
   if(tab==='My Team'){const picks=draftData().picks.filter(x=>x.manager===manager);
     content=`<h1>${teamPhoto(manager,64)} ${esc(myTeam.team)}</h1><button onclick="renameTeam()">Rename My Team</button><div class="fa-photo-editor"><label for="teamPhotoUpload">Team profile photo</label><input id="teamPhotoUpload" type="file" accept="image/jpeg,image/png,image/webp" onchange="uploadTeamPhoto(this)"><button onclick="removeTeamPhoto()" ${myTeam.photo?'':'disabled'}>Remove photo</button><p class="muted small">Images are cropped to a square and resized automatically.</p></div>
-      ${card('Drafted players',picks.map(x=>`<div class="row"><div><b>${esc(x.playerName)}</b>
+      ${card('Drafted players',picks.map(x=>`<div class="row"><div><b>${nflPlayerName(nflPlayerByName(x.playerName)||{name:x.playerName})}</b>
       <div class="muted small">${esc(x.position)} · Pick ${x.overall}</div></div>
       <b>${x.projectedPoints==null?'—':fmt(x.projectedPoints)}</b></div>`).join('')||'<p>No draft picks yet.</p>')}
       ${state.injuries.filter(i=>i.active).map(injuryCard).join('')}
@@ -1488,7 +1505,7 @@ function render(){if(!state||!manager)return;const mine=state.players.filter(x=>
   if(tab==='Draft')content=renderDraft();
   if(tab==='Locker Room')content=chatView();
   if(tab==='Notifications')content=`<h1>Notifications</h1>${card('Injury alerts',state.injuries.map(i=>
-    `<div class="row"><b>${esc(p(i.player)?.name||'Player')}</b><span>${i.active?'Pending':'Resolved'}</span></div>`).join('')||'<p>No alerts.</p>')}
+    `<div class="row"><b>${nflPlayerName(p(i.player))}</b><span>${i.active?'Pending':'Resolved'}</span></div>`).join('')||'<p>No alerts.</p>')}
     ${card('Push notifications',`<p>On iPhone, add Fantasy Audible to your Home Screen before enabling alerts. Notifications require permission and server configuration.</p><div class="actions"><button onclick="enablePush()">Enable injury alerts</button><button onclick="testPush()">Test notification</button><button onclick="disablePush()">Disable on this device</button></div>`)}
     ${card('Transactions',state.transactions.slice(0,50).map(t=>`<div class="row">${esc(t.details)}</div>`).join('')||'<p>No transactions.</p>')}`;
   if(tab==='Commissioner'&&state.viewer.commissioner)content=`<h1>Commissioner Controls</h1>
@@ -1555,7 +1572,7 @@ function leagueTeamRosterView(){
   const ir=players.filter(x=>x.slot==='IR');
   const order=['QB','RB','WR','TE','FLEX','D/ST','K'];
   starters.sort((a,b)=>order.indexOf(a.slot)-order.indexOf(b.slot)||a.name.localeCompare(b.name));
-  const rows=items=>items.map(x=>`<div class="row"><div><b>${esc(x.name)}</b><div class="muted small">${esc(x.slot)} · ${esc(x.pos)} · ${esc(x.team)}${x.injuryStatus?' · '+esc(x.injuryStatus):''}</div></div><b>${fmt(score(x))} pts</b></div>`).join('');
+  const rows=items=>items.map(x=>`<div class="row"><div><b>${nflPlayerName(x)}</b><div class="muted small">${esc(x.slot)} · ${esc(x.pos)} · ${esc(x.team)}${x.injuryStatus?' · '+esc(x.injuryStatus):''}</div></div><b>${fmt(score(x))} pts</b></div>`).join('');
   return `<section id="leagueRosterDetail" class="card"><div class="row"><h2>${teamPhoto(team.id,42)} ${esc(team.team)} · Roster</h2><button onclick="closeLeagueTeam()">Close</button></div>
     <p class="muted small">${players.length} rostered players · Current lineup and scores</p>
     <h3>Starters (${starters.length})</h3>${rows(starters)||'<p class="muted">No starters assigned yet.</p>'}
@@ -1603,7 +1620,7 @@ function tradePlayerRow(x,side){
   const projection=playerNextProjection(x);
   const last=tradeLastScore(x);
   return `<div class="row"><label style="display:flex;align-items:center;gap:8px;flex:1"><input type="checkbox" ${checked?'checked':''} onchange='tradeToggle(${jsAttr(side)},${jsAttr(String(x.id))})'>
-    <span><b>${esc(x.name)}</b><br><small>${esc(x.pos)} · ${esc(x.slot)} · Proj ${projection==null?'—':fmt(projection)} · Last ${last==null?'—':fmt(last)}</small></span></label>
+    <span><b>${nflPlayerName(x)}</b><br><small>${esc(x.pos)} · ${esc(x.slot)} · Proj ${projection==null?'—':fmt(projection)} · Last ${last==null?'—':fmt(last)}</small></span></label>
     <button type="button" onclick='openPlayerProfile(${jsAttr(String(x.espnId||x.id))})'>History</button></div>`;
 }
 function tradeAnalysis(){
