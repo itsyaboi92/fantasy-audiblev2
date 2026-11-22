@@ -1561,6 +1561,45 @@ async function api(req,res,route){
       return send(res,200,{season,week,teams,updatedAt:new Date().toISOString()});
     }catch(e){return send(res,503,{error:'NFL weekly schedule unavailable',details:e.message});}
   }
+  // On-demand read-only game tracker. Never updates scoring, standings or lineups.
+  if(req.method==='GET'&&route==='/api/nfl/game-tracker'){
+    const id=String(url.searchParams.get('gameId')||'');
+    if(!/^\\d{6,15}$/.test(id))return send(res,400,{error:'Invalid ESPN game ID'});
+    try{
+      if(!globalThis.faTrackerCache)globalThis.faTrackerCache=new Map();
+      const cache=globalThis.faTrackerCache;
+      let item=cache.get(id);
+      if(!item||Date.now()-item.at>20000){
+        const summary=await liveNFL.fetchGame(id);
+        const competition=summary.header?.competitions?.[0]||{};
+        const status=competition.status?.type||summary.header?.competitions?.[0]?.status?.type||{};
+        const gameStatus=status.completed?'final':status.state==='in'?'playing':'upcoming';
+        const plays=liveNFL.rawPlays(summary);
+        const current=summary.drives?.current||null;
+        const currentIds=new Set((current?.plays||[]).map(p=>String(p.id)));
+        const drivePlays=currentIds.size?plays.filter(p=>currentIds.has(String(p.id))):(current?.plays||[]);
+        const last=plays.at(-1)||null;
+        const position=p=>{
+          if(!p)return null;
+          const n=Number(p.yardLine);
+          return Number.isFinite(n)&&n>=0&&n<=100?n:null;
+        };
+        const spots=drivePlays.flatMap(p=>[position(p.start),position(p.end)]).filter(x=>x!==null);
+        const possession=current?.team?.abbreviation||current?.team?.displayName||null;
+        const lastPosition=position(last?.end)??position(last?.start);
+        const drivePosition=position(drivePlays.at(-1)?.end)??position(drivePlays.at(-1)?.start);
+        const location=drivePosition??lastPosition;
+        const details=last?.start?.downDistanceText||last?.start?.shortDownDistanceText||null;
+        const payload={gameId:id,status:gameStatus,clock:competition.status?.displayClock||null,period:competition.status?.period||null,
+          possession,location,driveTrail:spots.slice(-50),lastPlay:last?{description:String(last.text||last.shortText||'').slice(0,600),downDistance:details,clock:last.clock?.displayValue||null,period:last.period?.number||null}:null,
+          notice:current?'Current drive reported by ESPN': 'No active drive reported by ESPN',updatedAt:new Date().toISOString()};
+        item={at:Date.now(),payload};
+        if(cache.size>80)cache.clear();
+        cache.set(id,item);
+      }
+      return send(res,200,item.payload);
+    }catch(e){return send(res,503,{error:'NFL play-by-play unavailable',details:e.message});}
+  }
   // v31: Read-only, week-specific NFL boxscore. Does not mutate fantasy scoring or lineups.
   if(req.method==='GET'&&route==='/api/nfl/player-game'){
     const id=String(url.searchParams.get('id')||'');
