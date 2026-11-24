@@ -1211,7 +1211,6 @@ function faMatchForecastView(leftPlayers,rightPlayers,week,recorded,ledgerHome,l
     <div class="fa-forecast-label"><span>Projected final <b>${fmt(finalA)}</b></span><span><b>${fmt(finalB)}</b> ${unknown?'Known projected points':'Projected final'}</span></div>
     <div class="fa-favor-track" ><div class="fa-favor-left" style="width:${percent.toFixed(2)}%"></div><div class="fa-favor-needle" style="left:${percent.toFixed(2)}%"></div></div>
     <div class="fa-forecast-label"><span>${Math.round(percent)}% favored</span><span>${Math.round(100-percent)}% favored</span></div>
-    <div class="muted small" style="text-align:center;margin-top:8px">${(live?'Live: earned points + projected remaining · ':'Pregame: projected final · ')+ 'modeled favorability, not yet backtested'+(zeroFallbacks?' · '+zeroFallbacks+' missing ESPN projection'+(zeroFallbacks===1?'':'s')+' treated as 0.0':'')}</div>
   </div>`;
 }
 function matchupView(){
@@ -1286,7 +1285,7 @@ function matchupView(){
   <section class="card fa-match-surface" ontouchstart="matchupSwipeStart(event)" ontouchend="matchupSwipeEnd(event)">
     <div class="fa-match-nav"><button onclick="selectMatchup(${matchupIndex-1})">‹ Previous</button><span class="muted small">Matchup ${matchupIndex+1} of ${games.length}</span><button onclick="selectMatchup(${matchupIndex+1})">Next ›</button></div>
     <div class="fa-head"><div>${teamPhoto(game.home,54)}<br><b>${esc(left?.team||'Team')}</b><div class="fa-total">${total(game.home,'home')}</div></div><span>VS</span><div>${teamPhoto(game.away,54)}<br><b>${esc(right?.team||'Team')}</b><div class="fa-total">${total(game.away,'away')}</div></div></div>
-    <div class="fa-match-meta muted small">${esc(status)} · ${recorded?.status==='final'?'Verified final':'Scores remain provisional until verified'}</div>
+    ${recorded?.status==='final'?'<div class="fa-match-meta muted small">Final</div>':''}
     ${forecast}
     ${cells}<p class="muted small" style="text-align:center">Swipe left/right for other matchups · Scroll down for players</p>
   </section>${byeTeams.length?card('This week’s bye',byeTeams.map(x=>esc(x.team||x.id)).join(', ')):''}
