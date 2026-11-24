@@ -9,6 +9,10 @@ const evidence=[Object.freeze({
   // Week 10: Mevis was not an active kicker; he joined Baltimore's practice
   // squad on Nov 12. Do not extend this exception to Week 11 or beyond.
   week10Evidence:'https://www.cbssports.com/nfl/players/3162619/harrison-mevis/fantasy/'
+}),Object.freeze({
+  espnId:'4574716',season:2026,fromWeek:11,throughWeek:11,teamId:'33',
+  status:'RELEASED',effectiveDate:'2026-11-17',
+  source:'https://www.baltimoreravens.com/news/harrison-mevis-practice-squad-released-ravens-transactions-2026'
 })];
 function historicalStatus(espnId,season,week){
  const id=String(espnId||'').replace(/^espn-/,'');
