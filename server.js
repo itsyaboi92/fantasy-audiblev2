@@ -2290,6 +2290,17 @@ async function reconcileHistoricalMatchups(){
         continue;
       }
     }
+    // Explicit game-day inactive evidence, never absence from a box score.
+    if(c.pos!=='D/ST'&&summary&&c.game.status==='final'){
+      const saved=(snapshotMatches.find(m=>m.id===c.matchId)?.[c.side]||[]).find(p=>String(p.id)===c.id);
+      const inactiveGroups=Array.isArray(summary.inactives)?summary.inactives:[];
+      const inactive=inactiveGroups.some(group=>String(group.team?.id||'')===c.team&&
+        Array.isArray(group.athletes)&&group.athletes.some(a=>String(a.athlete?.id||a.id||'')===c.athleteId));
+      if(inactive&&saved&&!saved.scoringMode&&saved.points===0&&(!result||result.points===0)){
+        updates.push({...c,points:0,inactive:{source:'ESPN game '+c.game.id+' explicit inactive list'}});
+        continue;
+      }
+    }
     if(!result||!result.complete||!Number.isFinite(result.points))continue;
     updates.push({...c,points:result.points});
    }
