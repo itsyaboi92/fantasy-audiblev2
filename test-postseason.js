@@ -151,7 +151,7 @@ test('six-team views show qualification, earned byes, both brackets and final pl
   state,esc:String,fmt:n=>n.toFixed(2),m:id=>s.managers.find(m=>m.id===id),
   card:(heading,content)=>'<section><h2>'+heading+'</h2>'+content+'</section>'
  });
- vm.runInContext(extract('const sixTeamFixtureLabels=','function matchupView()')+
+ vm.runInContext(extract('const postseasonFixtureLabels=','function matchupView()')+
   extract('function postseasonData()','function render()'),context);
  const run=code=>vm.runInContext(code,context);
  assert.match(run('postseasonView()'),/All six teams qualify.*Week 14 · Opening round.*Championship bracket.*Consolation bracket/);
@@ -161,10 +161,10 @@ test('six-team views show qualification, earned byes, both brackets and final pl
  finish(s,14,()=>[100,75]);
  postseason.advance(s,accounts,verified);
  for(const week of [15,16]){
-  assert.match(run('sixTeamBye('+week+',state.postseason.championshipBye)'),/Championship bye/);
-  assert.match(run('sixTeamBye('+week+',state.postseason.consolationBye)'),/Consolation bye/);
+  assert.match(run('postseasonBye('+week+',state.postseason.championshipBye)'),/Championship bye/);
+  assert.match(run('postseasonBye('+week+',state.postseason.consolationBye)'),/Consolation bye/);
  }
- assert.equal(run('sixTeamBye(17,state.postseason.championshipBye)'), '');
+ assert.equal(run('postseasonBye(17,state.postseason.championshipBye)'), '');
  for(const week of [15,16,17,18]){
   finish(s,week,()=>[100,75]);
   postseason.advance(s,accounts,verified);
@@ -174,4 +174,87 @@ test('six-team views show qualification, earned byes, both brackets and final pl
  for(const {place,manager} of s.postseason.finalPlacements){
   assert.ok(html.includes('<span>'+place+'</span><b>Team '+manager+'</b>'));
  }
+});
+
+for(let count=7;count<=12;count++){
+ test(count+'-team consolation bracket follows the new schedule through Week 18',()=>{
+  let {s,accounts}=league(count);
+  const seeds=postseason.ranks(s,accounts);
+  const standings=leagueStandings(s,accounts);
+  const fixtures=(week,kind)=>s.frozenMatchupSchedule[week].filter(f=>f.kind===kind);
+  const advance=week=>{
+   s=JSON.parse(JSON.stringify(s));
+   assert.equal(postseason.advance(s,accounts,w=>w===week),true);
+   const after=structuredClone(s);
+   assert.equal(postseason.advance(s,accounts,w=>w===week),false);
+   assert.deepEqual(s,after);
+   assert.deepEqual(leagueStandings(s,accounts),standings);
+  };
+  assert.equal(postseason.start(s,accounts,verified),true);
+  if(count>=9){
+   const week14=fixtures(14,'consolation');
+   assert.deepEqual(pairs(week14),{
+    9:[[seeds[7],seeds[8]]],10:[[seeds[6],seeds[9]],[seeds[7],seeds[8]]],
+    11:[[seeds[9],seeds[10]]],12:[[seeds[8],seeds[11]],[seeds[9],seeds[10]]]
+   }[count]);
+   finish(s,14,f=>f.kind==='wild'?[75,100]:[100,75]);
+   advance(14);
+  }
+  const semifinalsOrPlayIns=fixtures(15,count<=10?'consolation-semi':'consolation');
+  if(count>=11){
+   assert.deepEqual(s.postseason.consolationByes[15],[seeds[2],seeds[3]]);
+   const survivors=seeds.slice(6,10);
+   assert.deepEqual(pairs(semifinalsOrPlayIns),[[survivors[0],survivors[3]],[survivors[1],survivors[2]]]);
+  }
+  for(const bye of s.postseason.consolationByes[15]){
+   assert.ok(s.frozenMatchupSchedule[15].every(f=>f.home!==bye&&f.away!==bye));
+  }
+  finish(s,15,f=>f.kind==='consolation-semi'?[75,100]:[100,75]);
+  advance(15);
+  const semifinals=fixtures(16,count<=10?'consolation-semi':'consolation');
+  if(count<=10){
+   assert.deepEqual(pairs(semifinals),pairs(semifinalsOrPlayIns));
+   assert.deepEqual(s.postseason.consolationByes[16],s.postseason.consolationByes[15]);
+   assert.equal(s.postseason.consolationEliminated.length,count>=9?(count-8):0);
+  }else{
+   assert.deepEqual(pairs(semifinals),[[seeds[2],seeds[7]],[seeds[3],seeds[6]]]);
+   assert.deepEqual(s.postseason.consolationByes[16],[]);
+  }
+  finish(s,16,()=>[125,100]);
+  advance(16);
+  const [final]=fixtures(17,'consolation-final');
+  assert.ok(final);
+  if(count<=10){
+   const semifinalWinners=semifinals.map(f=>f.home);
+   assert.ok(semifinalWinners.every(id=>[final.home,final.away].includes(id)));
+  }
+  finish(s,17,()=>[100,75]);
+  advance(17);
+  assert.equal(s.postseason.consolationChampion,null);
+  assert.deepEqual(pairs(fixtures(18,'consolation-final')),[[final.home,final.away]]);
+  finish(s,18,()=>count%2?[75,110]:[75,100]);
+  advance(18);
+  assert.equal(s.postseason.phase,'complete');
+  assert.equal(s.postseason.consolationChampion,count%2?final.away:final.home);
+  assert.match(matchupCommentary(s,18).find(m=>m.line.includes('won the consolation title')).line,/aggregate score/);
+ });
+}
+
+test('an in-progress legacy bracket retains single-week consolation',()=>{
+ const {s,accounts}=league(8);
+ postseason.start(s,accounts,verified);
+ delete s.postseason.consolationAggregate;
+ delete s.postseason.consolationByes;
+ for(const f of s.frozenMatchupSchedule[15]){
+  if(f.kind==='consolation-semi'){
+   f.kind='consolation';
+   f.id=f.id.replace('consolation-semi','consolation');
+  }
+ }
+ for(const week of [15,16]){
+  finish(s,week,()=>[100,75]);
+  assert.equal(postseason.advance(s,accounts,w=>w===week),true);
+ }
+ assert.ok(s.postseason.consolationChampion);
+ assert.ok(s.frozenMatchupSchedule[17].every(f=>!f.kind.startsWith('consolation')));
 });

@@ -49,13 +49,14 @@ function consolationFixtures(s,p,week){
 }
 function addPlacement(s,p,week,fixtures){
  const used=new Set(fixtures.flatMap(m=>[m.home,m.away]));
- const idle=p.seeds.filter(id=>!used.has(id));
+ const byes=p.consolationByes?.[week]||[];
+ const idle=p.seeds.filter(id=>!used.has(id)&&!byes.includes(id));
  // Do not pair a championship team playing its second aggregate leg elsewhere.
  const groups=[];for(let i=0;i+1<idle.length;i+=2)groups.push({id:`post-${week}-placement-${i/2}`,home:idle[i],away:idle[i+1],kind:'placement'});
  return [...fixtures,...groups];
 }
 function install(s,p,week,fixtures){
- if(s.frozenMatchupSchedule?.[week]?.length)return false;
+ if(s.frozenMatchupSchedule?.[week]?.length||hasRecordedWeek(s,week))return false;
  s.frozenMatchupSchedule||={};
  s.frozenMatchupSchedule[week]=addPlacement(s,p,week,fixtures);
  p.scheduledWeeks.push(week);return true;
@@ -80,7 +81,7 @@ function startSixTeam(s,seeds){
 function nextLeg(fixture,week){
  return {...fixture,id:fixture.id.replace(/^post-\d+-/,`post-${week}-`)};
 }
-function sixTeamScore(s,week,fixture){
+function fixtureScore(s,week,fixture){
  const result=score(s,week,fixture.id);
  return result?.home===fixture.home&&result.away===fixture.away&&
   Number.isFinite(result.homeScore)&&Number.isFinite(result.awayScore)?result:null;
@@ -89,7 +90,7 @@ function advanceSixTeam(s,p,verified){
  const seeds=p.seeds;
  const completed=week=>weekFinal(s,week,verified(week));
  if(p.phase==='opening'&&completed(14)){
-  const results=p.opening.map(f=>sixTeamScore(s,14,f));
+  const results=p.opening.map(f=>fixtureScore(s,14,f));
   if(results.some(x=>!x))return false;
   const ordered=ids=>ids.sort((a,b)=>seeds.indexOf(a)-seeds.indexOf(b));
   const championship=ordered(winners(results,seeds));
@@ -111,7 +112,7 @@ function advanceSixTeam(s,p,verified){
  }
  if(!completed(secondWeek))return false;
  const results=fixtures.map(f=>{
-  const first=sixTeamScore(s,firstWeek,f),second=sixTeamScore(s,secondWeek,nextLeg(f,secondWeek));
+  const first=fixtureScore(s,firstWeek,f),second=fixtureScore(s,secondWeek,nextLeg(f,secondWeek));
   return first&&second?aggregateScore(f,first,second):null;
  });
  if(results.some(x=>!x))return false;
@@ -134,6 +135,21 @@ function advanceSixTeam(s,p,verified){
  }
  return true;
 }
+function scheduleConsolation(s,p,week){
+ if(!p.consolationAggregate)return consolationFixtures(s,p,week);
+ if(week===18)return (s.frozenMatchupSchedule[17]||[])
+  .filter(f=>f.kind==='consolation-final').map(f=>nextLeg(f,week));
+ if(week===16&&p.seeds.length<=10){
+  p.consolationByes[16]=p.consolationByes[15]||[];
+  return (s.frozenMatchupSchedule[15]||[])
+   .filter(f=>f.kind==='consolation-semi').map(f=>nextLeg(f,week));
+ }
+ const fixtures=consolationFixtures(s,p,week);
+ const playing=new Set(fixtures.flatMap(f=>[f.home,f.away]));
+ p.consolationByes[week]=p.consolationActive.filter(id=>!playing.has(id));
+ const kind=week===17?'consolation-final':week===15&&p.seeds.length<=10?'consolation-semi':'consolation';
+ return fixtures.map((f,i)=>({...f,id:`post-${week}-${kind}-${i}`,kind}));
+}
 function start(s,accounts,verified){
  if(s.postseason?.locked)return false;
  const seed=ranks(s,accounts),n=seed.length;if(n<6||n>12)return false;
@@ -142,53 +158,68 @@ function start(s,accounts,verified){
  if(n===6&&end===13)return startSixTeam(s,seed);
  const q=n===6?4:qualifiers(n);
  const p={locked:true,lockedAt:new Date().toISOString(),regularSeasonEnd:end,seeds:seed,qualifiers:q,phase:'opening',scheduledWeeks:[],consolationActive:seed.slice(q),consolationEliminated:[],championshipFinal:null,consolationChampion:null};
- s.postseason=p;
+ if(n>=7)Object.assign(p,{consolationAggregate:true,consolationByes:{}});
  // Existing deployments may have a legacy Week 14 regular-season fixture.
  // Never replace a recorded Week 14 result.
  if(q===6 && !Object.keys(s.weeklyLedger?.[14]?.matchups||{}).length)delete s.frozenMatchupSchedule[14];
  if(q===6){
   const opening=[{id:'post-14-wild-0',home:seed[2],away:seed[5],kind:'wild'},
     {id:'post-14-wild-1',home:seed[3],away:seed[4],kind:'wild'}];
-  const con=consolationFixtures(s,p,14);install(s,p,14,[...opening,...con]);
+  const con=scheduleConsolation(s,p,14);if(!install(s,p,14,[...opening,...con]))return false;
  }else{
   const semis=[{id:'post-15-semi-0',home:seed[0],away:seed[3],kind:'semi'},
     {id:'post-15-semi-1',home:seed[1],away:seed[2],kind:'semi'}];
-  install(s,p,15,[...semis,...consolationFixtures(s,p,15)]);
+  if(!install(s,p,15,[...semis,...scheduleConsolation(s,p,15)]))return false;
   p.phase='semis';p.semifinals=semis;
  }
+ s.postseason=p;
  return true;
 }
 function advance(s,accounts,verified){
- const p=s.postseason;if(!p?.locked)return false;
- if(p.format===SIX_TEAM_FORMAT)return advanceSixTeam(s,p,verified);
+ const persisted=s.postseason;if(!persisted?.locked)return false;
+ if(persisted.format===SIX_TEAM_FORMAT)return advanceSixTeam(s,persisted,verified);
+ // Publish state changes only once the next week's fixtures are installed.
+ const p=structuredClone(persisted);
  const seed=p.seeds;
  const completed=w=>weekFinal(s,w,verified(w));
  const results=(week,kind)=> (s.frozenMatchupSchedule?.[week]||[]).filter(m=>m.kind===kind).map(m=>score(s,week,m.id));
  const settleConsolation=week=>{
-  const scheduled=(s.frozenMatchupSchedule?.[week]||[]).filter(m=>m.kind==='consolation');
-  if(!scheduled.length)return;
-  const result=scheduled.map(m=>score(s,week,m.id));if(result.some(x=>!x))return;
+  const kind=p.consolationAggregate&&week===18?'consolation-final':
+   p.consolationAggregate&&week===16&&seed.length<=10?'consolation-semi':'consolation';
+  const scheduled=(s.frozenMatchupSchedule?.[week]||[]).filter(m=>m.kind===kind);
+  if(!scheduled.length)return true;
+  const result=scheduled.map(m=>{
+   if(!p.consolationAggregate)return score(s,week,m.id);
+   const second=fixtureScore(s,week,m);
+   if(kind==='consolation')return second;
+   const first=fixtureScore(s,week-1,nextLeg(m,week-1));
+   return first&&second?aggregateScore(m,first,second):null;
+  });
+  if(result.some(x=>!x))return false;
   const knocked=losers(result,seed);p.consolationActive=p.consolationActive.filter(id=>!knocked.includes(id));
   p.consolationEliminated.push(...knocked);
   if(p.consolationActive.length===1)p.consolationChampion=p.consolationActive[0];
+  return true;
  };
+ const save=()=>{s.postseason=p;return true;};
  if(p.phase==='opening'&&completed(14)){
-  settleConsolation(14);
+  if(!settleConsolation(14))return false;
   const wild=results(14,'wild');if(wild.length!==2||wild.some(x=>!x))return false;
   const win=winners(wild,seed),lost=losers(wild,seed);
   p.consolationActive.push(...lost);
   const ordered=win.sort((a,b)=>seed.indexOf(a)-seed.indexOf(b));
   p.semifinals=[{id:'post-15-semi-0',home:seed[0],away:ordered[1],kind:'semi'},
     {id:'post-15-semi-1',home:seed[1],away:ordered[0],kind:'semi'}];
-  install(s,p,15,[...p.semifinals,...consolationFixtures(s,p,15)]);p.phase='semis';return true;
+  if(!install(s,p,15,[...p.semifinals,...scheduleConsolation(s,p,15)]))return false;
+  p.phase='semis';return save();
  }
  if(p.phase==='semis'&&completed(15)&&!p.scheduledWeeks.includes(16)){
-  settleConsolation(15);
+  if(!settleConsolation(15))return false;
   const legs=p.semifinals.map((m,i)=>({...m,id:`post-16-semi-${i}`}));
-  install(s,p,16,[...legs,...consolationFixtures(s,p,16)]);return true;
+  return install(s,p,16,[...legs,...scheduleConsolation(s,p,16)])&&save();
  }
  if(p.phase==='semis'&&completed(16)){
-  settleConsolation(16);
+  if(!settleConsolation(16))return false;
   const scores=p.semifinals.map((m,i)=>{
    const a=score(s,15,m.id),b=score(s,16,`post-16-semi-${i}`);if(!a||!b)return null;
    return aggregateScore(m,a,b);
@@ -196,20 +227,21 @@ function advance(s,accounts,verified){
   const win=winners(scores,seed),lost=losers(scores,seed);
   p.finals=[{id:'post-17-final-0',home:win[0],away:win[1],kind:'final'},
     {id:'post-17-third-0',home:lost[0],away:lost[1],kind:'third'}];
-  install(s,p,17,[...p.finals,...consolationFixtures(s,p,17)]);p.phase='finals';return true;
+  if(!install(s,p,17,[...p.finals,...scheduleConsolation(s,p,17)]))return false;
+  p.phase='finals';return save();
  }
  if(p.phase==='finals'&&completed(17)&&!p.scheduledWeeks.includes(18)){
-  settleConsolation(17);
+  if(!settleConsolation(17))return false;
   const legs=p.finals.map((m,i)=>({...m,id:`post-18-${m.kind}-${i}`}));
-  install(s,p,18,[...legs,...consolationFixtures(s,p,18)]);return true;
+  return install(s,p,18,[...legs,...scheduleConsolation(s,p,18)])&&save();
  }
  if(p.phase==='finals'&&completed(18)){
-  settleConsolation(18);
+  if(!settleConsolation(18))return false;
   const scores=p.finals.map((m,i)=>{const a=score(s,17,m.id),b=score(s,18,`post-18-${m.kind}-${i}`);
     return a&&b?aggregateScore(m,a,b):null;});
   if(scores.some(x=>!x))return false;
   p.championshipFinal={champion:winner(scores[0],seed),runnerUp:losers([scores[0]],seed)[0],third:winner(scores[1],seed)};
-  p.phase='complete';p.completedAt=new Date().toISOString();return true;
+  p.phase='complete';p.completedAt=new Date().toISOString();return save();
  }
  return false;
 }

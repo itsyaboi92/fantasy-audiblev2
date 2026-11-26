@@ -1213,15 +1213,16 @@ function faMatchForecastView(leftPlayers,rightPlayers,week,recorded,ledgerHome,l
     <div class="fa-forecast-label"><span>${Math.round(percent)}% favored</span><span>${Math.round(100-percent)}% favored</span></div>
   </div>`;
 }
-const sixTeamFixtureLabels={
+const postseasonFixtureLabels={
  opening:'Opening round',
  'championship-semi':'Championship semifinal',
  'consolation-semi':'Consolation semifinal',
  'championship-final':'Championship final',
  'consolation-final':'Consolation final'
 };
-function sixTeamBye(week,id){
+function postseasonBye(week,id){
  const p=state.postseason;
+ if(p?.consolationByes?.[week]?.includes(id))return 'Consolation bye · Advances to the next round';
  if(p?.format!=='six-team-reseeded'||week<15||week>16)return '';
  if(p.championshipBye===id)return 'Championship bye · Advances to the final';
  if(p.consolationBye===id)return 'Consolation bye · Advances to the final';
@@ -1237,10 +1238,10 @@ function matchupView(){
   if(matchupIndex>=games.length)matchupIndex=0;
   if(matchupWeek===null&&matchupAutoWeek!==week){matchupAutoWeek=week;const mine=games.findIndex(g=>g.home===manager||g.away===manager);matchupIndex=mine>=0?mine:0;}
   const game=games[matchupIndex],left=m(game.home),right=m(game.away);
-  const sixTeam=state.postseason?.format==='six-team-reseeded';
-  const byeTeams=state.managers.filter(x=>sixTeam?sixTeamBye(week,x.id):x.claimed&&!games.some(g=>g.home===x.id||g.away===x.id));
-  const byeNotice=byeTeams.length?card(sixTeam?'Earned postseason byes':'This week’s bye',
-    byeTeams.map(x=>sixTeam?'<div>'+esc(x.team)+' · '+esc(sixTeamBye(week,x.id))+'</div>':esc(x.team||x.id)).join(sixTeam?'':', ')):'';
+  const postseasonByes=state.postseason?.format==='six-team-reseeded'||state.postseason?.consolationAggregate;
+  const byeTeams=state.managers.filter(x=>postseasonByes?postseasonBye(week,x.id):x.claimed&&!games.some(g=>g.home===x.id||g.away===x.id));
+  const byeNotice=byeTeams.length?card(postseasonByes?'Earned postseason byes':'This week’s bye',
+    byeTeams.map(x=>postseasonByes?'<div>'+esc(x.team)+' · '+esc(postseasonBye(week,x.id))+'</div>':esc(x.team||x.id)).join(postseasonByes?'':', ')):'';
 
   const current=Number(state.week||state.nflDirectorySync?.currentWeek||1),isCurrent=week===current;
   const recorded=state.weeklyLedger?.[week]?.matchups?.[game.id];
@@ -1298,7 +1299,7 @@ function matchupView(){
   .fa-match-meta{text-align:center;margin:4px 0 16px}.fa-match-nav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:10px 0}
   @media(max-width:420px){.fa-head .fa-total{font-size:26px}.fa-player{font-size:12px}.fa-position{font-size:11px}}
   </style>
-  <h1>Week ${week} Matchups</h1>${byeNotice}${sixTeamFixtureLabels[game.kind]?'<p class="muted">'+sixTeamFixtureLabels[game.kind]+'</p>':''}<div class="fa-week"><button onclick="setMatchupWeek(${week-1})" ${week===1?'disabled':''}>‹</button><label>NFL Week <select onchange="setMatchupWeek(this.value)">${Array.from({length:18},(_,i)=>`<option value="${i+1}" ${week===i+1?'selected':''}>${i+1}</option>`).join('')}</select></label><button onclick="setMatchupWeek(${week+1})" ${week===18?'disabled':''}>›</button></div>
+  <h1>Week ${week} Matchups</h1>${byeNotice}${postseasonFixtureLabels[game.kind]?'<p class="muted">'+postseasonFixtureLabels[game.kind]+'</p>':''}<div class="fa-week"><button onclick="setMatchupWeek(${week-1})" ${week===1?'disabled':''}>‹</button><label>NFL Week <select onchange="setMatchupWeek(this.value)">${Array.from({length:18},(_,i)=>`<option value="${i+1}" ${week===i+1?'selected':''}>${i+1}</option>`).join('')}</select></label><button onclick="setMatchupWeek(${week+1})" ${week===18?'disabled':''}>›</button></div>
   <div class="fa-match-strip">${games.map((g,i)=>`<button class="fa-match-pill ${i===matchupIndex?'active':''}" onclick="selectMatchup(${i})"><span class="fa-pill-teams"><span class="fa-pill-team">${teamPhoto(g.home,24)} <span>${esc(m(g.home)?.team||g.home)}</span></span><span class="fa-pill-vs">vs</span><span class="fa-pill-team">${teamPhoto(g.away,24)} <span>${esc(m(g.away)?.team||g.away)}</span></span></span></button>`).join('')}</div>
   <section class="card fa-match-surface" ontouchstart="matchupSwipeStart(event)" ontouchend="matchupSwipeEnd(event)">
     <div class="fa-match-nav"><button onclick="selectMatchup(${matchupIndex-1})">‹ Previous</button><span class="muted small">Matchup ${matchupIndex+1} of ${games.length}</span><button onclick="selectMatchup(${matchupIndex+1})">Next ›</button></div>
@@ -1524,14 +1525,19 @@ function postseasonView(){
   const placements=p.finalPlacements?card('Final placements',p.finalPlacements.map(row=>
    '<div class="row"><span>'+row.place+'</span><b>'+team(row.manager)+'</b></div>').join('')):'';
   const stage=week=>{
+   const consolationByes=p.consolationByes?.[week]||[];
+   const byeRow=consolationByes.length?'<p class="muted small">Consolation byes · '+consolationByes.map(team).join(', ')+'</p>':'';
+   const aggregate=p.consolationAggregate&&(week>=17||(p.seeds.length<=10&&week>=15))
+    ?'<p class="muted small">Consolation scores combine across both legs.</p>':'';
    const fixtures=(state.matchupSchedule?.[week]||[]).filter(g=>g.kind&&g.kind!=='placement');
    return '<div style="min-width:180px;flex:1;border:1px solid #394960;border-radius:12px;padding:12px"><b>Week '+week+'</b>'+(
-    fixtures.length?fixtures.map(g=>'<div style="border:1px solid #4a607b;border-radius:8px;padding:10px;margin:8px 0">'+team(g.home)+'<div class="muted small">vs</div>'+team(g.away)+' <span class="muted small">('+esc(sixTeamFixtureLabels[g.kind]||g.kind)+')</span></div>').join(''):'<p class="muted">Awaiting previous round</p>')+'</div>';
+    fixtures.length?fixtures.map(g=>'<div style="border:1px solid #4a607b;border-radius:8px;padding:10px;margin:8px 0">'+team(g.home)+'<div class="muted small">vs</div>'+team(g.away)+' <span class="muted small">('+esc(postseasonFixtureLabels[g.kind]||g.kind)+')</span></div>').join(''):'<p class="muted">Awaiting previous round</p>')+byeRow+aggregate+'</div>';
   };
   return '<h1>Postseason · Official Bracket</h1><p>Seeds locked after Week '+p.regularSeasonEnd+'. Phase: <b>'+esc(p.phase)+'</b></p>'+
    card('Official seeds',p.seeds.map((id,i)=>'<div class="row"><b>#'+(i+1)+' '+team(id)+'</b><span>'+(sixTeam?'Qualified':i<p.qualifiers?'Championship':'Consolation')+'</span></div>').join(''))+
    card('Postseason schedule','<div style="display:flex;flex-wrap:wrap;gap:10px">'+[14,15,16,17,18].filter(w=>w>p.regularSeasonEnd).map(stage).join('')+'</div>')+
    byes+(placements||(p.championshipFinal?card('Final results','Champion: '+team(p.championshipFinal.champion)+' · Runner-up: '+team(p.championshipFinal.runnerUp)+' · Third: '+team(p.championshipFinal.third)):''))+
+   (!sixTeam&&p.consolationChampion?card('Consolation champion',team(p.consolationChampion)):'')+
    '<p class="muted small">Future rounds remain hidden until all preceding NFL games and fantasy scores are verified.</p>';
  }
  const d=postseasonData();if(d.n<6)return '<h1>Postseason</h1>'+card('Bracket projections','Six registered teams are required.');
@@ -1560,8 +1566,10 @@ function postseasonView(){
  card('Championship','<div style="display:flex;flex-wrap:wrap;gap:12px">'+round+stage('Weeks 15–16 · Semifinals',semi+'<p class="muted small">Two-week aggregate</p>')+
  stage('Weeks 17–18 · Finals',game('Semifinal winner A','Semifinal winner B')+game('Semifinal loser A','Semifinal loser B')+'<p class="muted small">Two-week aggregate; championship and third place</p>')+'</div>')+
  card('Consolation · Single elimination','<p>Initial entrants: '+d.rows.slice(d.slots).map((r,i)=>'#'+(i+d.slots+1)+' '+esc(r.name)).join(' · ')+
- '.</p><p>'+(wild?'Week 14 championship Wild Card losers enter consolation in Week 15.':'No championship Wild Card round for this league size.')+
- ' Eliminated teams continue playing placement matchups through Week 18.</p><p class="muted small">Pairings are not yet generated by the server. This is a preview, not an active bracket.</p>')+
+ '.</p><p>'+(d.n>=11?'Week 14 and Week 15 consolation rounds are single-week. Championship wild-card losers receive Week 15 byes and enter the single-week semifinals in Week 16.':
+ wild?'A single-week Week 14 play-in leaves two survivors. They join the two championship wild-card losers in the Weeks 15–16 aggregate semifinals.':
+ d.n>=7?'The semifinals use Weeks 15–16 aggregate scoring.':'Consolation rounds use single-week scoring.')+'</p>'+
+ (d.n>=7?'<p>The consolation final uses Weeks 17–18 aggregate scoring.</p>':''))+
  card('Projected seeds',d.rows.map((r,i)=>'<div class="row"><span>#'+(i+1)+' '+esc(r.name)+' · <b>'+d.status[i]+'</b></span><span class="muted small">'+r.w+'-'+r.l+'-'+r.t+' · '+fmt(r.pf)+' PF</span></div>').join(''))+
  '<p class="muted small">Clinch and elimination use conservative bounds based on verified finals and complete regular-season schedules. Missing data remains In the hunt.</p>';
 }
@@ -1586,7 +1594,7 @@ function render(){if(!state||!manager)return;if(!document.getElementById('fa-nfl
     ${card('Draft status',`<p>${esc(draftData().status)}</p><button onclick="changeTab('Draft')">Open draft room</button>`)}</div>
     ${card('Recent activity',state.transactions.slice(0,8).map(t=>`<div class="row"><span>${esc(t.details)}</span></div>`).join('')||'<p>No activity yet.</p>')}<p class="muted small" style="text-align:center;opacity:.7">Fantasy Audible · ${esc(faCurrentBuild)}</p>`;
   if(tab==='My Team'){const picks=draftData().picks.filter(x=>x.manager===manager);
-    const bye=sixTeamBye(Number(state.week),manager);
+    const bye=postseasonBye(Number(state.week),manager);
     content=`<h1>${teamPhoto(manager,64)} ${esc(myTeam.team)}</h1><button onclick="renameTeam()">Rename My Team</button><div class="fa-photo-editor"><label for="teamPhotoUpload">Team profile photo</label><input id="teamPhotoUpload" type="file" accept="image/jpeg,image/png,image/webp" onchange="uploadTeamPhoto(this)"><button onclick="removeTeamPhoto()" ${myTeam.photo?'':'disabled'}>Remove photo</button><p class="muted small">Images are cropped to a square and resized automatically.</p></div>
       ${bye?card('Postseason',esc(bye)):''}
       ${card('Drafted players',picks.map(x=>`<div class="row"><div><b>${nflPlayerName(nflPlayerByName(x.playerName)||{name:x.playerName})}</b>

@@ -557,11 +557,13 @@ function editorialEdition(s,kind,week,accounts=[]){
       'championship-semi':'A two-week series for a berth in the championship final.',
       'consolation-semi':'A two-week series for a berth in the consolation final.',
       'championship-final':'A two-week series for the league title.',
-      'consolation-final':'A two-week series for fourth place.'
+      'consolation-final':sixTeam?'A two-week series for fourth place.':'A two-week series for the consolation title.'
     };
     if(sixTeam&&(week===15||week===16)){
       lines.push(`${editorialTeam(s,s.postseason.championshipBye)} has the championship bye. ${editorialTeam(s,s.postseason.consolationBye)} has the consolation bye.`);
     }
+    const consolationByes=s.postseason?.consolationByes?.[week]||[];
+    if(consolationByes.length)lines.push('Consolation byes · '+consolationByes.map(id=>editorialTeam(s,id)).join(', '));
     const table=leagueStandings(s,accounts), ranks=new Map(table.map((r,i)=>[r.manager,{...r,rank:i+1}]));
     const teamCount=s.managers.filter(m=>accounts.some(a=>a.manager===m.id)).length||s.managers.length;
     const finalWeek=postseason.regularSeasonEnd(s,teamCount);
@@ -582,7 +584,7 @@ function editorialEdition(s,kind,week,accounts=[]){
     for(const f of fixtures){
       const h=editorialTeam(s,f.home),a=editorialTeam(s,f.away),hr=ranks.get(f.home),ar=ranks.get(f.away);
       const hp=teamProjection(f.home),ap=teamProjection(f.away);
-      const notes=sixTeam&&stakes[f.kind]?[stakes[f.kind]]:[],record=r=>r?`${r.wins}-${r.losses}${r.ties?'-'+r.ties:''}`:'unranked';
+      const notes=stakes[f.kind]?[stakes[f.kind]]:[],record=r=>r?`${r.wins}-${r.losses}${r.ties?'-'+r.ties:''}`:'unranked';
       if(hp.complete&&ap.complete){
         const diff=Math.abs(hp.total-ap.total),favorite=hp.total>=ap.total?h:a;
         notes.push(`Projected ${hp.total.toFixed(1)}–${ap.total.toFixed(1)}. ${diff<5?'This is a toss-up on paper.':diff<15?`${favorite} has the edge, but one big performance can flip it.`:`${favorite} is favored by ${diff.toFixed(1)} points. That's a target on their back.`}`);

@@ -92,7 +92,7 @@ function matchupCommentary(s,week,games=finalGames(s)){
           const aggregate=aggregateScore(match,leg,match);
           const advanced=postseasonWinner(aggregate,seeds);
           const total=fixed(aggregate.homeScore)+'–'+fixed(aggregate.awayScore);
-          const outcome=kind==='consolation-final'?' won the consolation final and finished fourth':
+          const outcome=kind==='consolation-final'?(s.postseason.format===SIX_TEAM_FORMAT?' won the consolation final and finished fourth':' won the consolation title'):
             kind==='consolation-semi'?' advanced to the consolation final':
             final?' won the league championship':' advanced to the championship';
           add(true,name(s,advanced)+outcome+
