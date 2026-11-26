@@ -1629,28 +1629,7 @@ async function api(req,res,route){
       let item=cache.get(id);
       if(!item||Date.now()-item.at>20000){
         const summary=await liveNFL.fetchGame(id);
-        const competition=summary.header?.competitions?.[0]||{};
-        const status=competition.status?.type||summary.header?.competitions?.[0]?.status?.type||{};
-        const gameStatus=status.completed?'final':status.state==='in'?'playing':'upcoming';
-        const plays=liveNFL.rawPlays(summary);
-        const current=summary.drives?.current||null;
-        const currentIds=new Set((current?.plays||[]).map(p=>String(p.id)));
-        const drivePlays=currentIds.size?plays.filter(p=>currentIds.has(String(p.id))):(current?.plays||[]);
-        const last=plays.at(-1)||null;
-        const position=p=>{
-          if(!p)return null;
-          const n=Number(p.yardLine);
-          return Number.isFinite(n)&&n>=0&&n<=100?n:null;
-        };
-        const spots=drivePlays.flatMap(p=>[position(p.start),position(p.end)]).filter(x=>x!==null);
-        const possession=current?.team?.abbreviation||current?.team?.displayName||null;
-        const lastPosition=position(last?.end)??position(last?.start);
-        const drivePosition=position(drivePlays.at(-1)?.end)??position(drivePlays.at(-1)?.start);
-        const location=drivePosition??lastPosition;
-        const details=last?.start?.downDistanceText||last?.start?.shortDownDistanceText||null;
-        const payload={gameId:id,status:gameStatus,clock:competition.status?.displayClock||null,period:competition.status?.period||null,
-          possession,location,driveTrail:spots.slice(-50),lastPlay:last?{description:String(last.text||last.shortText||'').slice(0,600),downDistance:details,clock:last.clock?.displayValue||null,period:last.period?.number||null}:null,
-          notice:current?'Current drive reported by ESPN': 'No active drive reported by ESPN',updatedAt:new Date().toISOString()};
+        const payload=liveNFL.gameTracker(summary,id);
         item={at:Date.now(),payload};
         if(cache.size>80)cache.clear();
         cache.set(id,item);

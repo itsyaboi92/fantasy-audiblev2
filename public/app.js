@@ -1042,17 +1042,46 @@ function toggleLiveFieldTracker(details){
   faTrackerGameId=String(gameId);refreshLiveFieldTracker();
 }
 function renderLiveFieldTracker(data){
-  const pos=Number(data.location);
-  const valid=data.location!==null&&Number.isFinite(pos)&&pos>=0&&pos<=100;
-  const trail=(data.driveTrail||[]).filter(x=>typeof x==='number'&&x>=0&&x<=100);
-  const x=n=>20+n*3;
-  const path=trail.length>1?'<polyline points="'+trail.map((n,i)=>x(n)+','+(i%2?53:49)).join(' ')+'" stroke="#ffd66d" stroke-width="3" fill="none" stroke-linejoin="round"/>':'';
-  const marks=Array.from({length:11},(_,i)=>'<line x1="'+(20+i*30)+'" y1="8" x2="'+(20+i*30)+'" y2="92" stroke="white" stroke-opacity=".32"/><text x="'+(20+i*30)+'" y="21" fill="white" font-size="9" text-anchor="middle">'+(i*10)+'</text>').join('');
-  const ball=valid?'<circle cx="'+x(pos)+'" cy="50" r="7" fill="#fff" stroke="#ffd66d" stroke-width="3"/>':'';
-  const field='<svg viewBox="0 0 340 100" style="width:100%;display:block;background:#185c3b;border-radius:8px" role="img" aria-label="Field position from own goal line to opponent goal line">'+marks+path+ball+'<text x="24" y="85" font-size="9" fill="white">OWN</text><text x="316" y="85" font-size="9" text-anchor="end" fill="white">OPP</text></svg>';
+  const pos=data.location;
+  const valid=Number.isFinite(pos)&&pos>=0&&pos<=100;
+  const {home,away}=data.teams||{};
+  const x=yard=>30+yard*3;
+  const yardLines=Array.from({length:21},(_,i)=>`M${x(i*5)} 0v120`).join(' ');
+  const hashes=Array.from({length:99},(_,i)=>`M${x(i+1)} 43v5m0 24v5`).join(' ');
+  const numbers=Array.from({length:9},(_,i)=>{
+    const yard=(i+1)*10;
+    const label=Math.min(yard,100-yard);
+    return `<text x="${x(yard)}" y="25">${label}</text><text x="${x(yard)}" y="103">${label}</text>`;
+  }).join('');
+  const trail=(data.driveTrail||[]).filter(yard=>Number.isFinite(yard)&&yard>=0&&yard<=100);
+  const path=trail.length>1?`<polyline points="${trail.map((yard,i)=>`${x(yard)},${i%2?62:58}`).join(' ')}"
+    stroke="#ffd66d" stroke-width="3" fill="none" stroke-linejoin="round"/>`:'';
+  const ball=valid?`<circle cx="${x(pos)}" cy="60" r="6" fill="#fff" stroke="#ffd66d" stroke-width="3"/>`:'';
+  const endZone=team=>team?`<div class="fa-tracker-endzone">${nflClubBadge({teamId:team.id,teamAbbr:team.abbreviation},32)}</div>`:
+    '<div class="fa-tracker-endzone"></div>';
+  const field=`<div class="fa-tracker-field">
+    <svg viewBox="0 0 360 120" aria-hidden="true">
+      <path d="M30 0h300v120H30z" fill="#22764d"/>
+      <path d="${yardLines}" stroke="#fff" stroke-opacity=".35"/>
+      <path d="${hashes}" stroke="#fff" stroke-opacity=".36" stroke-width=".75"/>
+      <path d="M30 0v120m150-120v120m150-120v120" stroke="#fff" stroke-opacity=".8" stroke-width="1.5"/>
+      <g fill="#fff" font-size="11" font-weight="700" text-anchor="middle">${numbers}</g>
+      ${path}${ball}
+    </svg>
+    <div class="fa-tracker-endzones">${endZone(home)}${endZone(away)}</div>
+  </div>`;
+  let fieldPosition='Field position unavailable';
+  if(valid){
+    const yard=Math.round(pos);
+    const side=(yard<50?home:away)?.abbreviation;
+    const marker=Math.min(yard,100-yard);
+    fieldPosition=yard===50?'Midfield':marker===0
+      ?`${side?side+' ':''}Goal line`
+      :side?`${side} ${marker}`:`${marker}-yard line`;
+  }
   const last=data.lastPlay;
   return '<div style="display:grid;gap:10px;padding:6px 0 14px">'+field+
-    '<div><b>'+esc(data.possession||'Possession unavailable')+'</b> · '+(valid?'Yard '+esc(String(Math.round(pos)))+' from own goal':'Field position unavailable')+
+    '<div><b>'+esc(data.possession||'Possession unavailable')+'</b> · '+esc(fieldPosition)+
     (data.period?' · Q'+esc(String(data.period)):'')+(data.clock?' · '+esc(data.clock):'')+'</div>'+
     '<div><b>Last play</b><p style="margin:4px 0">'+esc(last?.description||'No play reported yet.')+'</p>'+
     (last?.downDistance?'<span>'+esc(last.downDistance)+'</span>':'')+'</div>'+

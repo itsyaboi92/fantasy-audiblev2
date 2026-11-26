@@ -20,6 +20,39 @@ function rawPlays(summary){
  if(summary.drives?.current)collect(summary.drives.current.plays);
  return [...seen.values()].sort((a,b)=>Number(a.sequenceNumber||a.id||0)-Number(b.sequenceNumber||b.id||0));
 }
+function gameTracker(summary,gameId){
+ const competition=summary.header?.competitions?.[0];
+ const teams={};
+ for(const competitor of competition?.competitors||[]){
+  if(!['home','away'].includes(competitor.homeAway)||!competitor.team)continue;
+  const {id,abbreviation}=competitor.team;
+  teams[competitor.homeAway]={id,abbreviation};
+ }
+ const current=summary.drives?.current;
+ const plays=rawPlays(summary);
+ const currentIds=new Set((current?.plays||[]).map(play=>String(play.id)));
+ const drivePlays=plays.filter(play=>currentIds.has(String(play.id)));
+ const last=plays.at(-1);
+ // In ESPN play-by-play, 0 is the home goal line even when the away team has the ball.
+ const position=spot=>{
+  const raw=spot?.yardLine;
+  if(raw==null||raw==='')return null;
+  const yard=Number(raw);
+  return Number.isFinite(yard)&&yard>=0&&yard<=100?yard:null;
+ };
+ const trail=drivePlays.flatMap(play=>[position(play.start),position(play.end)]).filter(yard=>yard!==null);
+ const latest=current
+  ?trail.at(-1)??position(current.start)
+  :position(last?.end)??position(last?.start);
+ return {gameId,status:stateOf(competition||{}),clock:competition?.status?.displayClock||null,
+  period:competition?.status?.period||null,teams,
+  possession:current?.team?.abbreviation||current?.team?.displayName||null,
+  location:latest,driveTrail:trail.slice(-50),
+  lastPlay:last?{description:String(last.text||last.shortText||'').slice(0,600),
+   downDistance:last.start?.downDistanceText||last.start?.shortDownDistanceText||null}:null,
+  notice:current?'Current drive reported by ESPN':'No active drive reported by ESPN',
+  updatedAt:new Date().toISOString()};
+}
 function playEvents(summary){
  const events=[];
  for(const play of rawPlays(summary)){
@@ -441,4 +474,4 @@ async function fetchGame(id){
  }catch(e){console.warn('NFL CDN play feed unavailable for',id,e.message);}
  return summary;
 }
-module.exports={TEAM_IDS,loadWeek,verifyTeamBye,fetchGame,playerStats,rawPlays,playEvents,resolveKickerEvents,defenseEvents,scorePlayer,defenseStats,scoreDefense,teamId,defensivePlayerTotals,lostFumblesByTeam};
+module.exports={TEAM_IDS,loadWeek,verifyTeamBye,fetchGame,playerStats,rawPlays,gameTracker,playEvents,resolveKickerEvents,defenseEvents,scorePlayer,defenseStats,scoreDefense,teamId,defensivePlayerTotals,lostFumblesByTeam};

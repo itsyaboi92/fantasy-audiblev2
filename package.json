@@ -5,7 +5,7 @@
   "description": "Fantasy Audible multiplayer fantasy football application",
   "scripts": {
     "start": "node server.js",
-    "test": "node --check server.js && node --check public/app.js && node --test test-audible-commentary.js test-postseason.js test-my-team-scores.js"
+    "test": "node --check server.js && node --check public/app.js && node --test test-audible-commentary.js test-postseason.js test-my-team-scores.js test-live-field-tracker.js"
   },
   "engines": {
     "node": ">=20"
