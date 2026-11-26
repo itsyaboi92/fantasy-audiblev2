@@ -1228,12 +1228,23 @@ function postseasonBye(week,id){
  if(p.consolationBye===id)return 'Consolation bye · Advances to the final';
  return '';
 }
+function matchupWeekHeading(week){
+  return `<h1>Week ${week} Matchups</h1><div class="fa-week" style="display:flex;justify-content:center;align-items:center;gap:12px;margin:18px auto 22px;width:100%;"><button onclick="setMatchupWeek(${week-1})" ${week===1?'disabled':''}>‹</button><label>NFL Week <select onchange="setMatchupWeek(this.value)">${Array.from({length:18},(_,i)=>`<option value="${i+1}" ${week===i+1?'selected':''}>${i+1}</option>`).join('')}</select></label><button onclick="setMatchupWeek(${week+1})" ${week===18?'disabled':''}>›</button></div>`;
+}
 function matchupView(){
   syncAutomaticMatchupWeek();
-  const week=selectedMatchupWeek(),games=state.matchupSchedule?.[week]||[];
+  const week=selectedMatchupWeek();
+  if(week===14&&!state.postseason?.locked){
+    const projected=postseasonData();
+    if(projected.sixTeam){
+      return matchupWeekHeading(week)+card('Projected opening round',sixTeamOpeningGames(projected)+
+        '<p class="muted">The official matchups will be set when Week 13 scoring is verified and seeds lock.</p>');
+    }
+  }
+  const games=state.matchupSchedule?.[week]||[];
   if(!games.length){if(matchupWeek===null)matchupAutoWeek=week;const count=state.managers.filter(x=>x.claimed).length;
     const reason=count<2?'At least two registered teams are required.':state.draft?.status!=='completed'?'Matchups will be generated automatically when the draft finishes.':state.matchupScheduleNotice||(!state.scheduleStartWeek?'Draft completed. Automatic schedule activation pending; checking ESPN NFL kickoff calendar.':week<state.scheduleStartWeek?'Your league begins in NFL Week '+state.scheduleStartWeek+'.':week>postseasonData().end?'Awaiting verified final scoring and official postseason bracket activation or previous-round advancement.':'No matchup scheduled for this week.');
-    return `<h1>Week ${week} Matchups</h1><div class="fa-week" style="display:flex;justify-content:center;align-items:center;gap:12px;margin:18px auto 22px;width:100%;"><button onclick="setMatchupWeek(${week-1})" ${week===1?'disabled':''}>‹</button><label>NFL Week <select onchange="setMatchupWeek(this.value)">${Array.from({length:18},(_,i)=>`<option value="${i+1}" ${week===i+1?'selected':''}>${i+1}</option>`).join('')}</select></label><button onclick="setMatchupWeek(${week+1})" ${week===18?'disabled':''}>›</button></div>${card('League matchups',esc(reason))}`;
+    return matchupWeekHeading(week)+card('League matchups',esc(reason));
   }
   if(matchupIndex>=games.length)matchupIndex=0;
   if(matchupWeek===null&&matchupAutoWeek!==week){matchupAutoWeek=week;const mine=games.findIndex(g=>g.home===manager||g.away===manager);matchupIndex=mine>=0?mine:0;}
@@ -1515,6 +1526,11 @@ function postseasonData(){
   return 'In the hunt';
  });return {rows,n,slots,end,status,sixTeam};
 }
+const projectedMatchup=(a,b)=>'<div style="border:1px solid #4a607b;border-radius:9px;margin:10px 0;padding:12px"><b>'+a+'</b><div class="muted small">vs</div><b>'+b+'</b></div>';
+function sixTeamOpeningGames(d){
+ const seed=i=>'#'+(i+1)+' '+esc(d.rows[i].name);
+ return projectedMatchup(seed(0),seed(5))+projectedMatchup(seed(1),seed(4))+projectedMatchup(seed(2),seed(3));
+}
 function postseasonView(){
  if(state.postseason?.locked){
   const p=state.postseason,team=id=>esc(m(id)?.team||id||'TBD');
@@ -1542,16 +1558,16 @@ function postseasonView(){
  }
  const d=postseasonData();if(d.n<6)return '<h1>Postseason</h1>'+card('Bracket projections','Six registered teams are required.');
  const seed=i=>d.rows[i]?'#'+(i+1)+' '+esc(d.rows[i].name):'TBD';
- const game=(a,b)=>'<div style="border:1px solid #4a607b;border-radius:9px;margin:10px 0;padding:12px"><b>'+a+'</b><div class="muted small">vs</div><b>'+b+'</b></div>';
+
  const stage=(title,body)=>'<div style="border:1px solid #394960;border-radius:12px;padding:12px;min-width:190px;flex:1"><b>'+title+'</b>'+body+'</div>';
  if(d.sixTeam){
   const bracket=(title,finish)=>card(title,
-   stage('Weeks 15–16 · Semifinal',game('Second-highest seed','Lowest seed')+
+   stage('Weeks 15–16 · Semifinal',projectedMatchup('Second-highest seed','Lowest seed')+
     '<p class="muted small">The highest original seed earns a bye. '+finish[0]+'</p>')+
-   stage('Weeks 17–18 · Final',game('Highest original seed','Semifinal winner')+
+   stage('Weeks 17–18 · Final',projectedMatchup('Highest original seed','Semifinal winner')+
     '<p class="muted small">'+finish[1]+'</p>'));
   return '<h1>Postseason · Projected Brackets</h1><p>All six teams qualify. Seeds lock after Week 13.</p>'+
-   card('Week 14 · Opening round',game(seed(0),seed(5))+game(seed(1),seed(4))+game(seed(2),seed(3))+
+   card('Week 14 · Opening round',sixTeamOpeningGames(d)+
     '<p>Winners advance to the championship bracket. Losers enter the consolation bracket.</p>')+
    '<p>Semifinals and finals use two-week aggregate scoring.</p>'+
    bracket('Championship bracket',['The semifinal loser finishes third.','The finalists play for first and second.'])+
@@ -1560,11 +1576,11 @@ function postseasonView(){
     r.w+'-'+r.l+'-'+r.t+' · '+fmt(r.pf)+' PF</span></div>').join(''));
  }
  const wild=d.slots===6;
- const round=wild?stage('Week 14 · Wild Card',game(seed(2),seed(5))+game(seed(3),seed(4))+'<p class="muted small">#1 and #2 byes</p>'):'';
- const semi=wild?game(seed(0),'Lowest Wild Card winner')+game(seed(1),'Highest Wild Card winner'):game(seed(0),seed(3))+game(seed(1),seed(2));
+ const round=wild?stage('Week 14 · Wild Card',projectedMatchup(seed(2),seed(5))+projectedMatchup(seed(3),seed(4))+'<p class="muted small">#1 and #2 byes</p>'):'';
+ const semi=wild?projectedMatchup(seed(0),'Lowest Wild Card winner')+projectedMatchup(seed(1),'Highest Wild Card winner'):projectedMatchup(seed(0),seed(3))+projectedMatchup(seed(1),seed(2));
  return '<h1>Postseason · Projected Brackets</h1><p class="muted">Current standings projections. Seeds lock after Week '+d.end+'.</p>'+
  card('Championship','<div style="display:flex;flex-wrap:wrap;gap:12px">'+round+stage('Weeks 15–16 · Semifinals',semi+'<p class="muted small">Two-week aggregate</p>')+
- stage('Weeks 17–18 · Finals',game('Semifinal winner A','Semifinal winner B')+game('Semifinal loser A','Semifinal loser B')+'<p class="muted small">Two-week aggregate; championship and third place</p>')+'</div>')+
+ stage('Weeks 17–18 · Finals',projectedMatchup('Semifinal winner A','Semifinal winner B')+projectedMatchup('Semifinal loser A','Semifinal loser B')+'<p class="muted small">Two-week aggregate; championship and third place</p>')+'</div>')+
  card('Consolation · Single elimination','<p>Initial entrants: '+d.rows.slice(d.slots).map((r,i)=>'#'+(i+d.slots+1)+' '+esc(r.name)).join(' · ')+
  '.</p><p>'+(d.n>=11?'Week 14 and Week 15 consolation rounds are single-week. Championship wild-card losers receive Week 15 byes and enter the single-week semifinals in Week 16.':
  wild?'A single-week Week 14 play-in leaves two survivors. They join the two championship wild-card losers in the Weeks 15–16 aggregate semifinals.':

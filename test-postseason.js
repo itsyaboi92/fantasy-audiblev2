@@ -140,6 +140,7 @@ test('six-team views show qualification, earned byes, both brackets and final pl
  const app=fs.readFileSync(__dirname+'/public/app.js','utf8');
  const extract=(start,end)=>app.slice(app.indexOf(start),app.indexOf(end));
  const {s,accounts}=league(6);
+ s.frozenMatchupSchedule[14]=[{id:'legacy',home:'3',away:'5'}];
  const state={
   managers:s.managers.map(m=>({...m,claimed:true})),
   matchupSchedule:s.frozenMatchupSchedule,
@@ -149,13 +150,20 @@ test('six-team views show qualification, earned byes, both brackets and final pl
  };
  const context=vm.createContext({
   state,esc:String,fmt:n=>n.toFixed(2),m:id=>s.managers.find(m=>m.id===id),
+  syncAutomaticMatchupWeek:()=>{},selectedMatchupWeek:()=>14,
   card:(heading,content)=>'<section><h2>'+heading+'</h2>'+content+'</section>'
  });
- vm.runInContext(extract('const postseasonFixtureLabels=','function matchupView()')+
+ vm.runInContext(extract('const postseasonFixtureLabels=','function chatComposerFocused()')+
   extract('function postseasonData()','function render()'),context);
  const run=code=>vm.runInContext(code,context);
  assert.match(run('postseasonView()'),/All six teams qualify.*Week 14 · Opening round.*Championship bracket.*Consolation bracket/);
  assert.equal(run("postseasonData().status.join(',')"),Array(6).fill('Clinched').join(','));
+ const matchupHtml=run('matchupView()');
+ const openingGames=run('sixTeamOpeningGames(postseasonData())');
+ assert.match(matchupHtml,/Projected opening round.*Week 13 scoring is verified/);
+ assert.ok(matchupHtml.includes(openingGames));
+ assert.ok(run('postseasonView()').includes(openingGames));
+ assert.doesNotMatch(matchupHtml,/fa-match-strip|fa-total/);
  postseason.start(s,accounts,verified);
  state.postseason=s.postseason;
  finish(s,14,()=>[100,75]);
