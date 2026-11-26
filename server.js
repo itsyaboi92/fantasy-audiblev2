@@ -10,6 +10,7 @@ const { initializeESPN, getESPNPlayers } = require('./espn');
 const liveNFL = require('./live-nfl');
 const eventLedger = require('./event-ledger');
 const postseason = require('./postseason');
+const audibleCommentary = require('./audible-commentary');
 const tradeCentral = require('./trade-central');
 const {createResourceScheduler}=require('./resource-scheduler');
 const {mapBounded}=require('./bounded-work');
@@ -494,13 +495,9 @@ function editorialEdition(s,kind,week){
   const title=kind==='recap'?`Week ${week}: The Final Whistle`:kind==='rankings'?`Week ${week}: Power Rankings`:kind==='preview'?`Week ${week}: Matchup Preview`:`Week ${week}: Sunday Outlook`;
   const lines=[];
   if(kind==='recap'){
-    const finals=Object.values(ledger).filter(x=>x.status==='final');
-    if(!finals.length)return null; // Never fabricate completed games.
-    const sorted=[...finals].sort((a,b)=>Math.abs(b.homeScore-b.awayScore)-Math.abs(a.homeScore-a.awayScore));
-    for(const m of sorted){const h=editorialTeam(s,m.home),a=editorialTeam(s,m.away);
-      const margin=Math.abs(m.homeScore-m.awayScore).toFixed(1);
-      lines.push(`${h} ${m.homeScore.toFixed(1)} – ${a} ${m.awayScore.toFixed(1)}. ${m.winner?`${editorialTeam(s,m.winner)} takes it by ${margin}. ${Number(margin)<5?'That one needed a seatbelt.':'Somebody check the group chat.'}`:'A tie. Even the scoreboard refused to pick a side.'}`);}
-    const biggest=sorted[0];if(biggest)lines.unshift(`Biggest margin: ${editorialTeam(s,biggest.winner||biggest.home)} in a ${Math.abs(biggest.homeScore-biggest.awayScore).toFixed(1)}-point decision.`);
+    const finals=audibleCommentary.matchupCommentary(s,week).sort((a,b)=>b.margin-a.margin);
+    if(!finals.length)return null;
+    lines.push(...finals.map(match=>match.line));
     if(finals.length<fixtures.length)lines.push('Some matchups are still awaiting verified final scoring; this edition covers confirmed results only.');
   }else if(kind==='rankings'){
     const mean=v=>v.reduce((a,b)=>a+b,0)/Math.max(1,v.length);
@@ -732,7 +729,6 @@ function botEditionText(edition){
   return `${intro[edition.kind]||'🎙️ THE AUDIBLE'}\n${edition.title}\n${first}${edition.lines.length>3?'\nFull breakdown is on Home.':''}`.slice(0,1000);
 }
 // The Audible 2.0: commentary is isolated from scoring and transaction logic.
-const audibleCommentary=require('./audible-commentary');
 const botEventText=audibleCommentary.eventText;
 const botMatchupPosts=audibleCommentary.finalPosts;
 // Match explicit full team names and registered manager display names only.
@@ -758,10 +754,12 @@ let botBusy=false;
 async function publishLockerBot(){
   if(botBusy)return;botBusy=true;
   try{
-    const {state:s}=await snapshot(),leagueId=botLeagueId(s);
+    // Keep changes committed during publication eligible for the next pass.
+    const cutoff=(await pool.query('SELECT clock_timestamp() AS at')).rows[0].at;
+    const {state:s}=await snapshot({waitForWriter:true}),leagueId=botLeagueId(s);
     // New installations do not backfill years of historical transaction chatter.
     await pool.query(`INSERT INTO fantasy_audible_bot_cursor(league_id,last_at)
-      VALUES($1,NOW()) ON CONFLICT(league_id) DO NOTHING`,[leagueId]);
+      VALUES($1,$2) ON CONFLICT(league_id) DO NOTHING`,[leagueId,cutoff]);
     const cursor=await pool.query('SELECT last_at FROM fantasy_audible_bot_cursor WHERE league_id=$1',[leagueId]);
     const since=Date.parse(cursor.rows[0].last_at);
     const posts=[];
@@ -795,14 +793,11 @@ async function publishLockerBot(){
       posts.push({key,mentions:[player.owner],body:`🚨 THE AUDIBLE | LIVE INJURY: ${name} is now ${status} per ESPN (previously ${String(injury.previousDesignation||'unknown').replaceAll('_',' ')}). ${manager} has a problem. ${remark} Injury substitution eligibility depends on league rules.`});
     }
     // Only final scores; skip retroactive historic matchups on initial deployment.
-    for(const post of botMatchupPosts(s)){
-      const parts=post.key.split(':'),m=s.weeklyLedger?.[parts[1]]?.matchups?.[parts.slice(2).join(':')];
-      if(m&&Date.parse(m.updatedAt)>since)posts.push({...post,mentions:[m.home,m.away]});
-    }
+    posts.push(...botMatchupPosts(s,since));
     const delivered=[];
     const client=await pool.connect();
     try{await client.query('BEGIN');
-      for(const post of posts.slice(0,120)){
+      for(const post of posts){
         const inserted=await client.query(`WITH inserted AS (
           INSERT INTO fantasy_audible_bot_events(league_id,event_key) VALUES($1,$2)
           ON CONFLICT DO NOTHING RETURNING event_key)
@@ -810,7 +805,7 @@ async function publishLockerBot(){
           SELECT $1,$3,$4 FROM inserted RETURNING id`,[leagueId,post.key,BOT_MANAGER,post.body.slice(0,1000)]);
         if(inserted.rowCount)delivered.push(post);
       }
-      await client.query('UPDATE fantasy_audible_bot_cursor SET last_at=NOW() WHERE league_id=$1',[leagueId]);
+      await client.query('UPDATE fantasy_audible_bot_cursor SET last_at=GREATEST(last_at,$2) WHERE league_id=$1',[leagueId,cutoff]);
       await client.query('COMMIT');
     }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
     // Only notify after the post has committed; no duplicate or speculative mentions.
@@ -876,7 +871,8 @@ async function init(){await pool.query(`CREATE TABLE IF NOT EXISTS fantasy_audib
     created_at TIMESTAMPTZ DEFAULT NOW())`);
   await defenseStore.init(pool);
   await initializeESPN();}
-async function snapshot(){const r=await pool.query('SELECT state,accounts FROM fantasy_audible_store WHERE id=1');
+async function snapshot({waitForWriter=false}={}){
+  const r=await pool.query('SELECT state,accounts FROM fantasy_audible_store WHERE id=1'+(waitForWriter?' FOR SHARE':''));
   if(!r.rows.length)throw Error('Database not initialized');return r.rows[0];}
 async function change(fn){const c=await pool.connect();try{await c.query('BEGIN');
   const r=await c.query('SELECT state,accounts FROM fantasy_audible_store WHERE id=1 FOR UPDATE');

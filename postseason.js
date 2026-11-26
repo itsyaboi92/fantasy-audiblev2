@@ -23,6 +23,11 @@ function weekFinal(s,week,verifiedNFLWeek){
 function score(s,week,id){const m=s.weeklyLedger?.[week]?.matchups?.[id];return m&&m.status==='final'?m:null;}
 function winner(m,seed){if(!m)return null;if(m.homeScore!==m.awayScore)return m.homeScore>m.awayScore?m.home:m.away;
  return seed.indexOf(m.home)<seed.indexOf(m.away)?m.home:m.away;}
+function aggregateScore(fixture,first,second){
+ const scoreFor=(match,id)=>match.home===id?match.homeScore:match.awayScore;
+ const total=id=>(Math.round(scoreFor(first,id)*100)+Math.round(scoreFor(second,id)*100))/100;
+ return {...fixture,homeScore:total(fixture.home),awayScore:total(fixture.away)};
+}
 function losers(matches,seed){return matches.map(m=>{const w=winner(m,seed);return w===m.home?m.away:m.home;});}
 function winners(matches,seed){return matches.map(m=>winner(m,seed));}
 function consolationFixtures(s,p,week){
@@ -102,7 +107,7 @@ function advance(s,accounts,verified){
   settleConsolation(16);
   const scores=p.semifinals.map((m,i)=>{
    const a=score(s,15,m.id),b=score(s,16,`post-16-semi-${i}`);if(!a||!b)return null;
-   return {...m,homeScore:a.homeScore+b.homeScore,awayScore:a.awayScore+b.awayScore};
+   return aggregateScore(m,a,b);
   });if(scores.some(x=>!x))return false;
   const win=winners(scores,seed),lost=losers(scores,seed);
   p.finals=[{id:'post-17-final-0',home:win[0],away:win[1],kind:'final'},
@@ -117,11 +122,11 @@ function advance(s,accounts,verified){
  if(p.phase==='finals'&&completed(18)){
   settleConsolation(18);
   const scores=p.finals.map((m,i)=>{const a=score(s,17,m.id),b=score(s,18,`post-18-${m.kind}-${i}`);
-    return a&&b?{...m,homeScore:a.homeScore+b.homeScore,awayScore:a.awayScore+b.awayScore}:null;});
+    return a&&b?aggregateScore(m,a,b):null;});
   if(scores.some(x=>!x))return false;
   p.championshipFinal={champion:winner(scores[0],seed),runnerUp:losers([scores[0]],seed)[0],third:winner(scores[1],seed)};
   p.phase='complete';p.completedAt=new Date().toISOString();return true;
  }
  return false;
 }
-module.exports={endWeek,qualifiers,ranks,weekFinal,start,advance};
+module.exports={endWeek,qualifiers,ranks,weekFinal,start,advance,winner,aggregateScore};

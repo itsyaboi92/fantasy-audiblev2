@@ -1,5 +1,6 @@
 'use strict';
 const crypto=require('crypto');
+const {winner:postseasonWinner,aggregateScore}=require('./postseason');
 function pick(key,options){const n=crypto.createHash('sha256').update(String(key)).digest().readUInt32BE(0);return options[n%options.length];}
 function name(s,id){return String(s.managers.find(m=>m.id===id)?.team||'Unknown team').slice(0,80);}
 function record(s,id,before=Infinity){let wins=0,losses=0;for(const [week,r] of Object.entries(s.weeklyLedger||{})){if(Number(week)>=before)continue;for(const m of Object.values(r.matchups||{})){if(m.status!=='final'||![m.home,m.away].includes(id)||!Number.isFinite(m.homeScore)||!Number.isFinite(m.awayScore))continue;const own=m.home===id?m.homeScore:m.awayScore,other=m.home===id?m.awayScore:m.homeScore;if(own>other)wins++;else if(own<other)losses++;}}return wins+losses?wins+'-'+losses:null;}
@@ -14,33 +15,142 @@ case 'WAIVER_AWARDED':case 'FREE_AGENT_ADD':return (e.type==='WAIVER_AWARDED'?'�
 case 'RENAME':return '🪧 THE AUDIBLE | REBRAND: '+who+' changed the team name. '+pick(key,[(standing||'The record')+' did not change with the logo.','New name. Same damn roster.','Marketing is working harder than the football department.']);
 case 'DRAFT_COMPLETE':return '🎙️ THE AUDIBLE | DRAFT COMPLETE: Everybody thinks they built a contender. The scoreboard is about to identify the liars.';
 default:return null;}}
-function finalPosts(s){
- const posts=[], games=[];
- for(const [week,r] of Object.entries(s.weeklyLedger||{}))for(const m of Object.values(r.matchups||{})){
- if(m.status==='final'&&Number.isFinite(m.homeScore)&&Number.isFinite(m.awayScore))games.push({...m,week:Number(week)});
- }
- games.sort((a,b)=>a.week-b.week);
- for(const m of games){
- const week=m.week,key='final:'+week+':'+m.id,diff=Math.abs(m.homeScore-m.awayScore),winner=m.homeScore===m.awayScore?null:m.homeScore>m.awayScore?m.home:m.away;
- const loser=winner===m.home?m.away:m.home,hi=Math.max(m.homeScore,m.awayScore),lo=Math.min(m.homeScore,m.awayScore);
- const candidates=[];
- const add=(ok,fact,variants)=>{if(ok)candidates.push(fact+' '+pick(key+fact,variants));};
- add(!winner,'A tied final score.',['Nobody gets bragging rights.','The scoreboard refuses to pick a side.','Both managers leave with unfinished business.','An entire week for a stalemate.','Neither roster delivered the decisive point.']);
- add(diff>50,'A '+diff.toFixed(1)+'-point blowout.',['That was a demolition.','The mercy rule is conspicuously absent.','The film room needs a warning label.','That scoreboard belongs in a museum of disasters.','The opposition never found an answer.']);
- add(diff>0&&diff<1,'Just '+diff.toFixed(2)+' points separated the teams.',['Every decimal mattered.','That is a brutal way to lose.','The box score needs a magnifying glass.','One tiny scoring change rewrites everything.','Nobody should be comfortable with that margin.']);
- add(diff>=1&&diff<5,'A '+diff.toFixed(2)+'-point margin.',['That one needed a seatbelt.','The lineup decisions will be replayed all week.','A win is a win, even with a heart attack attached.','The difference was painfully small.','The scoreboard delivered a thriller.']);
- add(lo>0&&hi>=2*lo,'The winning score was at least twice the losing score.',['Two different levels of offense showed up.','That is a serious imbalance.','The numbers are downright rude.','The losing roster needs answers.','One offense made the other look optional.']);
- if(winner){
- const previous=games.filter(g=>g.week<week&&[g.home,g.away].includes(winner));
- const won=g=>g.home===winner?g.homeScore>g.awayScore:g.awayScore>g.homeScore;
- let streak=1;for(let i=previous.length-1;i>=0&&won(previous[i]);i--)streak++;
- add(streak>=2,name(s,winner)+' has won '+streak+' straight.',['Momentum has entered the building.','The league should be paying attention.','The winning habit is getting comfortable.','The opposition needs a new plan.','That streak is becoming a storyline.']);
- add(previous.length>0&&!previous.some(won),name(s,winner)+' earned its first recorded win.',['The drought is over.','The comeback tour finally has a ticket sale.','The win column is open for business.','That is a foundation to build on.','The season finally has a positive chapter.']);
- const oldScores=previous.map(g=>g.home===winner?g.homeScore:g.awayScore);
- add(oldScores.length>0&&hi>Math.max(...oldScores),name(s,winner)+' set a new personal scoring high of '+hi.toFixed(1)+'.',['The offense raised its ceiling.','That is a new benchmark.','The roster found another gear.','The previous high is history.','The scoring department deserves its flowers.']);
- }
- const remark=candidates.slice(0,2).join(' ')||('Final margin: '+diff.toFixed(1)+' points.');
- posts.push({key,body:('🏁 THE AUDIBLE | WEEK '+week+': '+name(s,m.home)+' '+m.homeScore.toFixed(1)+' – '+name(s,m.away)+' '+m.awayScore.toFixed(1)+'. '+remark).slice(0,1000)});
- }return posts;
+function verifiedFinal(m){
+  return m?.status==='final'&&Number.isFinite(m.homeScore)&&Number.isFinite(m.awayScore);
 }
-module.exports={eventText,finalPosts};
+
+function finalGames(s){
+  return Object.entries(s.weeklyLedger||{})
+    .flatMap(([week,entry])=>Object.values(entry.matchups||{})
+      .filter(verifiedFinal).map(match=>({...match,week:Number(week)})))
+    .sort((a,b)=>a.week-b.week||String(a.id).localeCompare(String(b.id)));
+}
+
+function scoreFor(match,id){
+  return match.home===id?match.homeScore:match.awayScore;
+}
+
+function resultFor(match,id){
+  return Math.sign(scoreFor(match,id)-scoreFor(match,match.home===id?match.away:match.home));
+}
+
+function matchupCommentary(s,week,games=finalGames(s)){
+  const weekly=games.filter(match=>match.week===week);
+  const history=games.filter(match=>match.week<week);
+  const byTeam=new Map();
+  for(const match of history){
+    for(const id of [match.home,match.away]){
+      if(!byTeam.has(id))byTeam.set(id,[]);
+      byTeam.get(id).push(match);
+    }
+  }
+  const fixtures=s.frozenMatchupSchedule?.[week]||[];
+  const ledger=s.weeklyLedger?.[week]?.matchups||{};
+  const complete=fixtures.length>1&&fixtures.length===weekly.length&&
+    fixtures.every(fixture=>verifiedFinal(ledger[fixture.id])&&
+      ledger[fixture.id].home===fixture.home&&ledger[fixture.id].away===fixture.away);
+  const weeklyHigh=complete?Math.max(...weekly.flatMap(match=>[match.homeScore,match.awayScore])):null;
+  const scores=complete?weekly.flatMap(match=>[match.homeScore,match.awayScore]):[];
+  const best=score=>scores.filter(other=>other>score).length;
+  const fixed=points=>points.toFixed(2);
+
+  return weekly.map(match=>{
+    const {id,home,away,homeScore,awayScore}=match;
+    const key='final:'+week+':'+id;
+    const diff=Math.abs(Math.round(homeScore*100)-Math.round(awayScore*100))/100;
+    const winner=homeScore===awayScore?null:homeScore>awayScore?home:away;
+    const loser=winner===home?away:home;
+    const hi=Math.max(homeScore,awayScore),lo=Math.min(homeScore,awayScore);
+    const facts=[];
+    const add=(condition,fact,variants)=>{
+      if(condition)facts.push(fact+' '+pick(key+fact,variants));
+    };
+
+    const seeds=s.postseason?.seeds;
+    const kind=fixtures.find(f=>f.id===id&&f.home===home&&f.away===away)?.kind;
+    if(seeds?.includes(home)&&seeds.includes(away)){
+      if(kind==='wild'){
+        const advanced=postseasonWinner(match,seeds);
+        add(true,name(s,advanced)+' advanced from the wild-card round.',
+          ['The next round awaits.','That result keeps the title run alive.']);
+      }
+      if((kind==='semi'&&week===16)||(kind==='final'&&week===18)){
+        const first=s.frozenMatchupSchedule?.[week-1]?.find(f=>f.kind===kind&&
+          [f.home,f.away].includes(home)&&[f.home,f.away].includes(away));
+        const leg=history.find(m=>m.week===week-1&&first&&m.id===first.id&&
+          m.home===first.home&&m.away===first.away);
+        if(leg){
+          const aggregate=aggregateScore(match,leg,match);
+          const advanced=postseasonWinner(aggregate,seeds);
+          const total=fixed(aggregate.homeScore)+'–'+fixed(aggregate.awayScore);
+          add(true,name(s,advanced)+(kind==='final'?' won the league championship':' advanced to the championship')+
+            ' with a '+total+' aggregate score.'+
+            (aggregate.homeScore===aggregate.awayScore?' The higher seed won the tiebreaker.':''),
+            ['Both legs are in the books.','The full series decided it.']);
+          add(resultFor(leg,advanced)<0,name(s,advanced)+' overturned a first-leg deficit of '+
+            fixed(Math.abs(leg.homeScore-leg.awayScore))+' points.',
+            ['The second leg changed the series.','That was a two-week comeback.']);
+        }
+      }
+    }
+
+    add(!winner,'A tied final score.',['Neither roster delivered the decisive point.','The scoreboard refuses to pick a side.']);
+    add(diff>0&&diff<1,'Just '+fixed(diff)+' points separated the teams.',
+      ['Every decimal mattered.','The box score needs a magnifying glass.']);
+    add(diff>=1&&diff<5,'A '+fixed(diff)+'-point margin.',
+      ['That one needed a seatbelt.','The lineup decisions will be replayed all week.']);
+    add(diff>50,'A '+fixed(diff)+'-point blowout.',
+      ['That was a demolition.','The opposition never found an answer.']);
+
+    if(winner){
+      const wonBy=name(s,winner),lostBy=name(s,loser);
+      const previous=byTeam.get(winner)||[],opponentHistory=byTeam.get(loser)||[];
+      const wins=previous.filter(m=>resultFor(m,winner)>0).length;
+      const lastNonLoss=previous.findLastIndex(m=>resultFor(m,winner)>=0);
+      const losingRun=previous.length-lastNonLoss-1;
+      const lastNonWin=previous.findLastIndex(m=>resultFor(m,winner)<=0);
+      const winningRun=previous.length-lastNonWin;
+      const lastOpponentNonWin=opponentHistory.findLastIndex(m=>resultFor(m,loser)<=0);
+      const opponentRun=opponentHistory.length-lastOpponentNonWin-1;
+      const lastMeeting=previous.findLast(m=>[m.home,m.away].includes(loser));
+
+      add(complete&&best(lo)===1&&scores.filter(score=>score===lo).length===1,lostBy+' lost despite posting the week’s second-highest score.',
+        ['That score would have beaten every other opponent.','The schedule did the damage.']);
+      add(opponentRun>=2,wonBy+' ended '+lostBy+'’s '+opponentRun+'-game winning streak.',
+        ['The league finally found an answer.','That run stops here.']);
+      add(previous.length>0&&wins===0,wonBy+' earned its first recorded win.',
+        ['The win column is open for business.','The drought is over.']);
+      add(wins>0&&losingRun>=2,wonBy+' snapped a '+losingRun+'-game losing streak.',
+        ['The skid ends here.','That is a result to build on.']);
+      add(lastMeeting&&resultFor(lastMeeting,winner)<0,wonBy+' avenged its Week '+lastMeeting?.week+' loss to '+lostBy+'.',
+        ['The rematch went the other way.','They remembered the first box score.']);
+      add(winningRun>=2,wonBy+' has won '+winningRun+' straight.',
+        ['The winning habit is getting comfortable.','The league should be paying attention.']);
+      add(previous.length>0&&previous.every(m=>hi>scoreFor(m,winner)),
+        wonBy+' set a new personal scoring high of '+fixed(hi)+'.',
+        ['The offense raised its ceiling.','The previous high is history.']);
+    }
+
+    for(const [team,points] of [[home,homeScore],[away,awayScore]]){
+      add(points===weeklyHigh,name(s,team)+(scores.filter(score=>score===points).length>1?' tied for the weekly scoring lead with ':' led the week with ')+fixed(points)+' points.',
+        ['That is the benchmark for the week.','The offense earned its flowers.']);
+    }
+    add(lo>0&&hi>=2*lo,'The winning score was at least twice the losing score.',
+      ['Two different levels of offense showed up.','The numbers are downright rude.']);
+    const scoreline=name(s,home)+' '+fixed(homeScore)+' – '+name(s,away)+' '+fixed(awayScore)+'.';
+    const remark=facts.slice(0,2).join(' ')||('Final margin: '+fixed(diff)+' points.');
+    return {key,id,week,updatedAt:match.finalizedAt||match.updatedAt,mentions:[home,away],
+      margin:diff,line:scoreline+' '+remark};
+  });
+}
+
+function finalPosts(s,since=-Infinity){
+  const games=finalGames(s);
+  const weeks=new Set(games.filter(match=>Date.parse(match.finalizedAt||match.updatedAt)>since||
+    since===-Infinity).map(match=>match.week));
+  return [...weeks].flatMap(week=>matchupCommentary(s,week,games))
+    .filter(post=>since===-Infinity||Date.parse(post.updatedAt)>since)
+    .map(post=>({...post,body:('🏁 THE AUDIBLE | WEEK '+post.week+': '+post.line).slice(0,1000)}));
+}
+
+module.exports={eventText,finalPosts,matchupCommentary};
