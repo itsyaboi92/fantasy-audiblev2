@@ -14,12 +14,33 @@ case 'WAIVER_AWARDED':case 'FREE_AGENT_ADD':return (e.type==='WAIVER_AWARDED'?'�
 case 'RENAME':return '🪧 THE AUDIBLE | REBRAND: '+who+' changed the team name. '+pick(key,[(standing||'The record')+' did not change with the logo.','New name. Same damn roster.','Marketing is working harder than the football department.']);
 case 'DRAFT_COMPLETE':return '🎙️ THE AUDIBLE | DRAFT COMPLETE: Everybody thinks they built a contender. The scoreboard is about to identify the liars.';
 default:return null;}}
-function finalPosts(s){const posts=[];for(const [week,r] of Object.entries(s.weeklyLedger||{}))for(const m of Object.values(r.matchups||{})){
-if(m.status!=='final'||!Number.isFinite(m.homeScore)||!Number.isFinite(m.awayScore))continue;
-const diff=Math.abs(m.homeScore-m.awayScore),winner=m.homeScore===m.awayScore?null:m.homeScore>m.awayScore?m.home:m.away;
-const key='final:'+week+':'+m.id;
-const remark=!winner?'Neither team could finish the job. Congratulations to absolutely nobody.':diff>=40?pick(key,['That was an ass-kicking with a box score.','Somebody call the league office. This was a public execution of a playoff dream.','Less a competition, more a cautionary tale.']):diff<=3?pick(key,['The loser will be replaying every lineup decision all week.','That margin will haunt somebody until next Sunday.','One bad roster decision from rewriting the entire story.']):pick(key,['The scoreboard is not accepting excuses.','One manager gets bragging rights. The other gets a long week.','One team celebrates. The other is writing an apology to the group chat.']);
-const prior=winner?record(s,winner,Number(week)):null;
-posts.push({key,body:('🏁 THE AUDIBLE | WEEK '+week+': '+name(s,m.home)+' '+m.homeScore.toFixed(1)+' – '+name(s,m.away)+' '+m.awayScore.toFixed(1)+'. '+remark+(prior?' '+name(s,winner)+' entered this week '+prior+'.':'')).slice(0,1000)});
-}return posts;}
+function finalPosts(s){
+ const posts=[], games=[];
+ for(const [week,r] of Object.entries(s.weeklyLedger||{}))for(const m of Object.values(r.matchups||{})){
+ if(m.status==='final'&&Number.isFinite(m.homeScore)&&Number.isFinite(m.awayScore))games.push({...m,week:Number(week)});
+ }
+ games.sort((a,b)=>a.week-b.week);
+ for(const m of games){
+ const week=m.week,key='final:'+week+':'+m.id,diff=Math.abs(m.homeScore-m.awayScore),winner=m.homeScore===m.awayScore?null:m.homeScore>m.awayScore?m.home:m.away;
+ const loser=winner===m.home?m.away:m.home,hi=Math.max(m.homeScore,m.awayScore),lo=Math.min(m.homeScore,m.awayScore);
+ const candidates=[];
+ const add=(ok,fact,variants)=>{if(ok)candidates.push(fact+' '+pick(key+fact,variants));};
+ add(!winner,'A tied final score.',['Nobody gets bragging rights.','The scoreboard refuses to pick a side.','Both managers leave with unfinished business.','An entire week for a stalemate.','Neither roster delivered the decisive point.']);
+ add(diff>50,'A '+diff.toFixed(1)+'-point blowout.',['That was a demolition.','The mercy rule is conspicuously absent.','The film room needs a warning label.','That scoreboard belongs in a museum of disasters.','The opposition never found an answer.']);
+ add(diff>0&&diff<1,'Just '+diff.toFixed(2)+' points separated the teams.',['Every decimal mattered.','That is a brutal way to lose.','The box score needs a magnifying glass.','One tiny scoring change rewrites everything.','Nobody should be comfortable with that margin.']);
+ add(diff>=1&&diff<5,'A '+diff.toFixed(2)+'-point margin.',['That one needed a seatbelt.','The lineup decisions will be replayed all week.','A win is a win, even with a heart attack attached.','The difference was painfully small.','The scoreboard delivered a thriller.']);
+ add(lo>0&&hi>=2*lo,'The winning score was at least twice the losing score.',['Two different levels of offense showed up.','That is a serious imbalance.','The numbers are downright rude.','The losing roster needs answers.','One offense made the other look optional.']);
+ if(winner){
+ const previous=games.filter(g=>g.week<week&&[g.home,g.away].includes(winner));
+ const won=g=>g.home===winner?g.homeScore>g.awayScore:g.awayScore>g.homeScore;
+ let streak=1;for(let i=previous.length-1;i>=0&&won(previous[i]);i--)streak++;
+ add(streak>=2,name(s,winner)+' has won '+streak+' straight.',['Momentum has entered the building.','The league should be paying attention.','The winning habit is getting comfortable.','The opposition needs a new plan.','That streak is becoming a storyline.']);
+ add(previous.length>0&&!previous.some(won),name(s,winner)+' earned its first recorded win.',['The drought is over.','The comeback tour finally has a ticket sale.','The win column is open for business.','That is a foundation to build on.','The season finally has a positive chapter.']);
+ const oldScores=previous.map(g=>g.home===winner?g.homeScore:g.awayScore);
+ add(oldScores.length>0&&hi>Math.max(...oldScores),name(s,winner)+' set a new personal scoring high of '+hi.toFixed(1)+'.',['The offense raised its ceiling.','That is a new benchmark.','The roster found another gear.','The previous high is history.','The scoring department deserves its flowers.']);
+ }
+ const remark=candidates.slice(0,2).join(' ')||('Final margin: '+diff.toFixed(1)+' points.');
+ posts.push({key,body:('🏁 THE AUDIBLE | WEEK '+week+': '+name(s,m.home)+' '+m.homeScore.toFixed(1)+' – '+name(s,m.away)+' '+m.awayScore.toFixed(1)+'. '+remark).slice(0,1000)});
+ }return posts;
+}
 module.exports={eventText,finalPosts};
