@@ -1,9 +1,9 @@
 'use strict';
 const crypto=require('crypto');
-const {winner:postseasonWinner,aggregateScore}=require('./postseason');
+const {SIX_TEAM_FORMAT,winner:postseasonWinner,aggregateScore}=require('./postseason');
 function pick(key,options){const n=crypto.createHash('sha256').update(String(key)).digest().readUInt32BE(0);return options[n%options.length];}
 function name(s,id){return String(s.managers.find(m=>m.id===id)?.team||'Unknown team').slice(0,80);}
-function record(s,id,before=Infinity){let wins=0,losses=0;for(const [week,r] of Object.entries(s.weeklyLedger||{})){if(Number(week)>=before)continue;for(const m of Object.values(r.matchups||{})){if(m.status!=='final'||![m.home,m.away].includes(id)||!Number.isFinite(m.homeScore)||!Number.isFinite(m.awayScore))continue;const own=m.home===id?m.homeScore:m.awayScore,other=m.home===id?m.awayScore:m.homeScore;if(own>other)wins++;else if(own<other)losses++;}}return wins+losses?wins+'-'+losses:null;}
+function record(s,id,before=Infinity){let wins=0,losses=0;for(const [week,r] of Object.entries(s.weeklyLedger||{})){if(Number(week)>=before)continue;for(const m of Object.values(r.matchups||{})){if(m.id?.startsWith('post-')||m.status!=='final'||![m.home,m.away].includes(id)||!Number.isFinite(m.homeScore)||!Number.isFinite(m.awayScore))continue;const own=m.home===id?m.homeScore:m.awayScore,other=m.home===id?m.awayScore:m.homeScore;if(own>other)wins++;else if(own<other)losses++;}}return wins+losses?wins+'-'+losses:null;}
 function eventText(s,e){const who=name(s,e.manager),d=String(e.details||'').slice(0,220),key=e.id||e.at||d,standing=record(s,e.manager);
 switch(e.type){
 case 'SUBSTITUTION':{
@@ -74,7 +74,16 @@ function matchupCommentary(s,week,games=finalGames(s)){
         add(true,name(s,advanced)+' advanced from the wild-card round.',
           ['The next round awaits.','That result keeps the title run alive.']);
       }
-      if((kind==='semi'&&week===16)||(kind==='final'&&week===18)){
+      if(kind==='opening'&&s.postseason.format===SIX_TEAM_FORMAT){
+        const advanced=postseasonWinner(match,seeds);
+        const consolation=advanced===home?away:home;
+        add(true,name(s,advanced)+' advanced to the championship bracket. '+name(s,consolation)+
+          ' entered the consolation bracket.'+(homeScore===awayScore?' The higher seed won the tiebreaker.':''),
+          ['The opening round set both brackets.']);
+      }
+      const semifinal=['semi','championship-semi','consolation-semi'].includes(kind);
+      const final=['final','championship-final','consolation-final'].includes(kind);
+      if((semifinal&&week===16)||(final&&week===18)){
         const first=s.frozenMatchupSchedule?.[week-1]?.find(f=>f.kind===kind&&
           [f.home,f.away].includes(home)&&[f.home,f.away].includes(away));
         const leg=history.find(m=>m.week===week-1&&first&&m.id===first.id&&
@@ -83,7 +92,10 @@ function matchupCommentary(s,week,games=finalGames(s)){
           const aggregate=aggregateScore(match,leg,match);
           const advanced=postseasonWinner(aggregate,seeds);
           const total=fixed(aggregate.homeScore)+'–'+fixed(aggregate.awayScore);
-          add(true,name(s,advanced)+(kind==='final'?' won the league championship':' advanced to the championship')+
+          const outcome=kind==='consolation-final'?' won the consolation final and finished fourth':
+            kind==='consolation-semi'?' advanced to the consolation final':
+            final?' won the league championship':' advanced to the championship';
+          add(true,name(s,advanced)+outcome+
             ' with a '+total+' aggregate score.'+
             (aggregate.homeScore===aggregate.awayScore?' The higher seed won the tiebreaker.':''),
             ['Both legs are in the books.','The full series decided it.']);

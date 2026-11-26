@@ -489,7 +489,7 @@ const {currentWeekScore,ledgerScore,ledgerLineup,ledgerTotal,updateWeeklyLedger,
 // V24: Persisted, league-scoped editorial editions. No invented game results.
 function editorialWeek(s){return Math.max(1,Math.min(18,Number(s.week)||1));}
 function editorialTeam(s,id){return s.managers.find(m=>m.id===id)?.team||'Unknown team';}
-function editorialEdition(s,kind,week){
+function editorialEdition(s,kind,week,accounts=[]){
   const fixtures=(s.frozenMatchupSchedule||{})[week]||[];
   const ledger=s.weeklyLedger?.[week]?.matchups||{};
   const title=kind==='recap'?`Week ${week}: The Final Whistle`:kind==='rankings'?`Week ${week}: Power Rankings`:kind==='preview'?`Week ${week}: Matchup Preview`:`Week ${week}: Sunday Outlook`;
@@ -551,9 +551,22 @@ function editorialEdition(s,kind,week){
     return {id:'rankings-'+week,kind,week,title,lines,rankedIds:ranked.map(r=>r.id),commentaryVersion:5,publishedAt:new Date().toISOString()};
   }else if(kind==='preview'){
     if(!fixtures.length)return null;
-    const table=leagueStandings(s,[]), ranks=new Map(table.map((r,i)=>[r.manager,{...r,rank:i+1}]));
-    const teamCount=s.managers.length, playoffSpots=postseason.qualifiers(teamCount);
-    const finalWeek=postseason.endWeek(teamCount), weeksLeft=Math.max(0,finalWeek-week+1);
+    const sixTeam=s.postseason?.format===postseason.SIX_TEAM_FORMAT;
+    const stakes={
+      opening:'The winner advances to the championship bracket. The loser enters consolation.',
+      'championship-semi':'A two-week series for a berth in the championship final.',
+      'consolation-semi':'A two-week series for a berth in the consolation final.',
+      'championship-final':'A two-week series for the league title.',
+      'consolation-final':'A two-week series for fourth place.'
+    };
+    if(sixTeam&&(week===15||week===16)){
+      lines.push(`${editorialTeam(s,s.postseason.championshipBye)} has the championship bye. ${editorialTeam(s,s.postseason.consolationBye)} has the consolation bye.`);
+    }
+    const table=leagueStandings(s,accounts), ranks=new Map(table.map((r,i)=>[r.manager,{...r,rank:i+1}]));
+    const teamCount=s.managers.filter(m=>accounts.some(a=>a.manager===m.id)).length||s.managers.length;
+    const finalWeek=postseason.regularSeasonEnd(s,teamCount);
+    const playoffSpots=teamCount===6&&finalWeek===14?4:postseason.qualifiers(teamCount);
+    const weeksLeft=Math.max(0,finalWeek-week+1);
     const prior=Object.entries(s.weeklyLedger||{}).filter(([w])=>Number(w)<week);
     const weeklyProjection=p=>{
       const v=Number(p.weeklyProjectedPoints);
@@ -569,14 +582,14 @@ function editorialEdition(s,kind,week){
     for(const f of fixtures){
       const h=editorialTeam(s,f.home),a=editorialTeam(s,f.away),hr=ranks.get(f.home),ar=ranks.get(f.away);
       const hp=teamProjection(f.home),ap=teamProjection(f.away);
-      const notes=[],record=r=>r?`${r.wins}-${r.losses}${r.ties?'-'+r.ties:''}`:'unranked';
+      const notes=sixTeam&&stakes[f.kind]?[stakes[f.kind]]:[],record=r=>r?`${r.wins}-${r.losses}${r.ties?'-'+r.ties:''}`:'unranked';
       if(hp.complete&&ap.complete){
         const diff=Math.abs(hp.total-ap.total),favorite=hp.total>=ap.total?h:a;
         notes.push(`Projected ${hp.total.toFixed(1)}–${ap.total.toFixed(1)}. ${diff<5?'This is a toss-up on paper.':diff<15?`${favorite} has the edge, but one big performance can flip it.`:`${favorite} is favored by ${diff.toFixed(1)} points. That's a target on their back.`}`);
       }else if(hp.known||ap.known){
         notes.push(`Full matchup projections aren't available yet (${h}: ${hp.known}/${hp.starters} starters; ${a}: ${ap.known}/${ap.starters}). No fake favorite from me.`);
       }
-      if(hr&&ar){
+      if(hr&&ar&&!f.kind){
         if(hr.wins===0&&ar.losses===0&&ar.wins>0)notes.push(`${h} is hunting a first win against unbeaten ${a}. That is a dangerous amount of confidence on one sideline.`);
         else if(ar.wins===0&&hr.losses===0&&hr.wins>0)notes.push(`${a} is hunting a first win against unbeaten ${h}. Someone's perfect record is on the menu.`);
         else if(hr.wins===0||ar.wins===0)notes.push(`${hr.wins===0?h:a} is still looking for win number one. The excuses are running out.`);
@@ -584,13 +597,14 @@ function editorialEdition(s,kind,week){
         else if(Math.abs(hr.wins-ar.wins)<=1)notes.push('These teams are close in the standings; this result could shake up the order.');
       }
       const playoffNote=(r,name)=>{
-        if(!r||week>finalWeek)return null;
+        if(!r||week>finalWeek||playoffSpots===teamCount)return null;
         const ahead=table.filter(x=>x.manager!==r.manager&&x.wins>r.wins+weeksLeft).length;
         if(ahead>=playoffSpots)return `${name} cannot reach a playoff spot even by winning out, based on teams already ahead.`;
         if(r.rank>playoffSpots&&weeksLeft<=3)return `${name} sits outside the top ${playoffSpots} with ${weeksLeft} regular-season weeks including this one. Every result matters.`;
         if(r.rank<=playoffSpots&&weeksLeft<=2)return `${name} currently holds a playoff position, but has not necessarily clinched.`;
         return null;
       };
+      if(teamCount===6&&finalWeek===13&&week<=13)notes.push('All six teams qualify. This matchup affects opening-round seeding.');
       const playoff=[playoffNote(hr,h),playoffNote(ar,a)].filter(Boolean);
       if(playoff.length)notes.push(playoff.join(' '));
       const history=prior.flatMap(([,v])=>Object.values(v.matchups||{})).filter(m=>((m.home===f.home&&m.away===f.away)||(m.home===f.away&&m.away===f.home))&&m.status==='final');
@@ -688,12 +702,12 @@ async function publishEditorial(){
         !(preview.editorial||[]).some(e=>e.id===`recap-${week}`);
     });
     if(!stalePreview&&!readyRecaps.length&&(!scheduledKind||(preview.editorial||[]).some(e=>e.id===`${scheduledKind}-${current}`)))return;
-    await change(s=>{
+    await change((s,accounts)=>{
       s.editorial ||= [];
       for(let i=0;i<s.editorial.length;i++){
         const old=s.editorial[i];
         if(old.kind==='rankings'){if(old.week!==editorialWeek(s)||old.commentaryVersion>=5)continue;}else if(!['preview','outlook'].includes(old.kind)||old.commentaryVersion>=(old.kind==='outlook'?4:3))continue;
-        const revised=editorialEdition(s,old.kind,old.week);
+        const revised=editorialEdition(s,old.kind,old.week,accounts);
         if(revised)s.editorial[i]={...revised,commentaryVersion:old.kind==='rankings'?5:old.kind==='outlook'?4:3,publishedAt:old.publishedAt,updatedAt:new Date().toISOString()};
       }
       const nowWeek=editorialWeek(s);
@@ -701,14 +715,14 @@ async function publishEditorial(){
         const fixtures=s.frozenMatchupSchedule?.[week]||[];
         const ledger=s.weeklyLedger?.[week]?.matchups||{};
         if(fixtures.length&&fixtures.every(f=>ledger[f.id]?.status==='final')&&!s.editorial.some(e=>e.id===`recap-${week}`)){
-          const edition=editorialEdition(s,'recap',week);
+          const edition=editorialEdition(s,'recap',week,accounts);
           if(edition)s.editorial.unshift(edition);
         }
       }
       const {day:today,hour:currentHour}=easternEditorialNow();
       const kind=today==='Wed'&&currentHour>=9?'rankings':today==='Thu'&&currentHour>=9?'preview':today==='Sun'&&currentHour>=8?'outlook':null;
       if(kind&&!s.editorial.some(e=>e.id===`${kind}-${nowWeek}`)){
-        const edition=editorialEdition(s,kind,nowWeek);
+        const edition=editorialEdition(s,kind,nowWeek,accounts);
         if(edition)s.editorial.unshift(edition);
       }
       s.editorial=s.editorial.slice(0,48);
@@ -1894,7 +1908,7 @@ async function api(req,res,route){
       s.injuries=[];s.waiverClaims=[];s.waiverHolds={};s.waiverPriority=s.managers.map(m=>m.id);
       s.phase=0;
       s.week=1;delete s.frozenMatchupSchedule;delete s.scheduleStartWeek;delete s.scheduleSeason;
-      delete s.matchupScheduleNotice;delete s.weeklyLedger;
+      delete s.matchupScheduleNotice;delete s.weeklyLedger;delete s.postseason;delete s.postseasonNFLFinal;
       // Remove draft-specific history while retaining non-draft audits.
       const draftEvents=new Set([
         'DRAFT_PICK','AUTO_PICK','DRAFT_STARTED','DRAFT_PAUSED',
@@ -2177,6 +2191,11 @@ async function syncNFLScoring(){
       }
     }
     await change((s,accounts)=>{
+      if(Number(s.week)>week)return {ok:true};
+      const teamCount=s.managers.filter(m=>accounts.some(a=>a.manager===m.id)).length;
+      const sixTeamSeason=teamCount===6&&postseason.regularSeasonEnd(s,teamCount)===13;
+      // A scheduled legacy Week 14 must never be scored while Week 13 is settling.
+      if(sixTeamSeason&&week===14&&!s.postseason?.locked)return {ok:true};
       // Player-directory history is updated by its own NFL-calendar sync below.
       // Never overwrite it with the fantasy league's draft/matchup week.
       const ids=new Map();for(const game of games)for(const t of game.teams)ids.set(t.id,game);
@@ -2221,11 +2240,20 @@ async function syncNFLScoring(){
       }
       s.week=week;
       updateWeeklyLedger(s,accounts,week,games,failures);
+      s.postseasonNFLFinal ||= {};
+      s.postseasonNFLFinal[week]=games.length>0&&games.every(g=>g.status==='final')&&failures.length===0;
+      if(sixTeamSeason){
+        const verified=w=>Boolean(s.postseasonNFLFinal?.[w]);
+        const changed=s.postseason?.locked
+          ?postseason.advance(s,accounts,verified)
+          :postseason.start(s,accounts,verified);
+        if(changed)audit(s,'POSTSEASON_UPDATED',null,'Phase: '+s.postseason.phase);
+      }
       // ESPN's scoreboard may still report the completed week until Thursday.
       // Preserve historical scoring before opening the next fantasy lineup.
       const weekComplete=games.length>=10&&games.every(g=>g.status==='final')&&failures.length===0;
       const nextWeek=week+1;
-      if(weekComplete&&nextWeek<=18&&(s.frozenMatchupSchedule?.[nextWeek]||[]).length){
+      if(weekComplete&&nextWeek<=18&&(!sixTeamSeason||nextWeek<=13||s.postseason?.scheduledWeeks.includes(nextWeek))&&(s.frozenMatchupSchedule?.[nextWeek]||[]).length){
         s.week=nextWeek;
         for(const p of s.players){
           p.points=0;p.credited=0;delete p.scoreAtSwap;p.scoreWeek=nextWeek;
@@ -2236,8 +2264,6 @@ async function syncNFLScoring(){
         expireOldInjuryState(s);
         audit(s,'NFL_WEEK_ADVANCED',null,'Week '+week+' completed; Week '+nextWeek+' lineups opened');
       }
-      s.postseasonNFLFinal ||= {};
-      s.postseasonNFLFinal[week]=games.length>0&&games.every(g=>g.status==='final')&&failures.length===0;
       s.nflSync={season,week,at:new Date().toISOString(),games:games.map(g=>({id:g.id,status:g.status,kickoff:g.kickoff,teams:g.teams})),failures,updatedPlayers:changed,warning:'Hybrid event/box-score scoring: category-level box-score fallback; event-specific distances and returns retained. Check liveScoreStatus for provisional results.'};
       return {ok:true};
     });
@@ -2598,7 +2624,7 @@ async function updatePostseason(){
   if(ensureDraft(state).status!=='completed'||!state.frozenMatchupSchedule)return;
   const n=accounts.filter(a=>state.managers.some(m=>m.id===a.manager)).length;
   if(n<6||n>12)return;
-  const end=postseason.endWeek(n);
+  const end=postseason.regularSeasonEnd(state,n);
   const phase=state.postseason?.phase;
   const weeks=!state.postseason?.locked?[end]:phase==='opening'?[14]:phase==='semis'?[15,16]:phase==='finals'?[17,18]:[];
   const season=Number(state.scheduleSeason||process.env.NFL_SEASON||new Date().getUTCFullYear());

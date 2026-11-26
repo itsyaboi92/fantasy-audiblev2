@@ -1213,17 +1213,35 @@ function faMatchForecastView(leftPlayers,rightPlayers,week,recorded,ledgerHome,l
     <div class="fa-forecast-label"><span>${Math.round(percent)}% favored</span><span>${Math.round(100-percent)}% favored</span></div>
   </div>`;
 }
+const sixTeamFixtureLabels={
+ opening:'Opening round',
+ 'championship-semi':'Championship semifinal',
+ 'consolation-semi':'Consolation semifinal',
+ 'championship-final':'Championship final',
+ 'consolation-final':'Consolation final'
+};
+function sixTeamBye(week,id){
+ const p=state.postseason;
+ if(p?.format!=='six-team-reseeded'||week<15||week>16)return '';
+ if(p.championshipBye===id)return 'Championship bye · Advances to the final';
+ if(p.consolationBye===id)return 'Consolation bye · Advances to the final';
+ return '';
+}
 function matchupView(){
   syncAutomaticMatchupWeek();
   const week=selectedMatchupWeek(),games=state.matchupSchedule?.[week]||[];
   if(!games.length){if(matchupWeek===null)matchupAutoWeek=week;const count=state.managers.filter(x=>x.claimed).length;
-    const reason=count<2?'At least two registered teams are required.':state.draft?.status!=='completed'?'Matchups will be generated automatically when the draft finishes.':state.matchupScheduleNotice||(!state.scheduleStartWeek?'Draft completed. Automatic schedule activation pending; checking ESPN NFL kickoff calendar.':week<state.scheduleStartWeek?'Your league begins in NFL Week '+state.scheduleStartWeek+'.':week>=(state.postseason?.regularSeasonEnd||((state.managers||[]).filter(m=>m.claimed).length<=8?14:13))?'Awaiting verified final scoring and official postseason bracket activation or previous-round advancement.':'No matchup scheduled for this week.');
+    const reason=count<2?'At least two registered teams are required.':state.draft?.status!=='completed'?'Matchups will be generated automatically when the draft finishes.':state.matchupScheduleNotice||(!state.scheduleStartWeek?'Draft completed. Automatic schedule activation pending; checking ESPN NFL kickoff calendar.':week<state.scheduleStartWeek?'Your league begins in NFL Week '+state.scheduleStartWeek+'.':week>postseasonData().end?'Awaiting verified final scoring and official postseason bracket activation or previous-round advancement.':'No matchup scheduled for this week.');
     return `<h1>Week ${week} Matchups</h1><div class="fa-week" style="display:flex;justify-content:center;align-items:center;gap:12px;margin:18px auto 22px;width:100%;"><button onclick="setMatchupWeek(${week-1})" ${week===1?'disabled':''}>‹</button><label>NFL Week <select onchange="setMatchupWeek(this.value)">${Array.from({length:18},(_,i)=>`<option value="${i+1}" ${week===i+1?'selected':''}>${i+1}</option>`).join('')}</select></label><button onclick="setMatchupWeek(${week+1})" ${week===18?'disabled':''}>›</button></div>${card('League matchups',esc(reason))}`;
   }
   if(matchupIndex>=games.length)matchupIndex=0;
   if(matchupWeek===null&&matchupAutoWeek!==week){matchupAutoWeek=week;const mine=games.findIndex(g=>g.home===manager||g.away===manager);matchupIndex=mine>=0?mine:0;}
   const game=games[matchupIndex],left=m(game.home),right=m(game.away);
-  const byeTeams=state.managers.filter(x=>x.claimed&&!games.some(g=>g.home===x.id||g.away===x.id));
+  const sixTeam=state.postseason?.format==='six-team-reseeded';
+  const byeTeams=state.managers.filter(x=>sixTeam?sixTeamBye(week,x.id):x.claimed&&!games.some(g=>g.home===x.id||g.away===x.id));
+  const byeNotice=byeTeams.length?card(sixTeam?'Earned postseason byes':'This week’s bye',
+    byeTeams.map(x=>sixTeam?'<div>'+esc(x.team)+' · '+esc(sixTeamBye(week,x.id))+'</div>':esc(x.team||x.id)).join(sixTeam?'':', ')):'';
+
   const current=Number(state.week||state.nflDirectorySync?.currentWeek||1),isCurrent=week===current;
   const recorded=state.weeklyLedger?.[week]?.matchups?.[game.id];
   const lineupBySlot=rows=>{const used=new Set();return STARTER_ORDER.map(slot=>{const p=(rows||[]).find(x=>!used.has(x.id)&&(x.slot===slot||(slot==='FLEX'&&['RB','WR','TE'].includes(x.slot))));if(p)used.add(p.id);return p||null;});};
@@ -1280,7 +1298,7 @@ function matchupView(){
   .fa-match-meta{text-align:center;margin:4px 0 16px}.fa-match-nav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:10px 0}
   @media(max-width:420px){.fa-head .fa-total{font-size:26px}.fa-player{font-size:12px}.fa-position{font-size:11px}}
   </style>
-  <h1>Week ${week} Matchups</h1><div class="fa-week"><button onclick="setMatchupWeek(${week-1})" ${week===1?'disabled':''}>‹</button><label>NFL Week <select onchange="setMatchupWeek(this.value)">${Array.from({length:18},(_,i)=>`<option value="${i+1}" ${week===i+1?'selected':''}>${i+1}</option>`).join('')}</select></label><button onclick="setMatchupWeek(${week+1})" ${week===18?'disabled':''}>›</button></div>
+  <h1>Week ${week} Matchups</h1>${byeNotice}${sixTeamFixtureLabels[game.kind]?'<p class="muted">'+sixTeamFixtureLabels[game.kind]+'</p>':''}<div class="fa-week"><button onclick="setMatchupWeek(${week-1})" ${week===1?'disabled':''}>‹</button><label>NFL Week <select onchange="setMatchupWeek(this.value)">${Array.from({length:18},(_,i)=>`<option value="${i+1}" ${week===i+1?'selected':''}>${i+1}</option>`).join('')}</select></label><button onclick="setMatchupWeek(${week+1})" ${week===18?'disabled':''}>›</button></div>
   <div class="fa-match-strip">${games.map((g,i)=>`<button class="fa-match-pill ${i===matchupIndex?'active':''}" onclick="selectMatchup(${i})"><span class="fa-pill-teams"><span class="fa-pill-team">${teamPhoto(g.home,24)} <span>${esc(m(g.home)?.team||g.home)}</span></span><span class="fa-pill-vs">vs</span><span class="fa-pill-team">${teamPhoto(g.away,24)} <span>${esc(m(g.away)?.team||g.away)}</span></span></span></button>`).join('')}</div>
   <section class="card fa-match-surface" ontouchstart="matchupSwipeStart(event)" ontouchend="matchupSwipeEnd(event)">
     <div class="fa-match-nav"><button onclick="selectMatchup(${matchupIndex-1})">‹ Previous</button><span class="muted small">Matchup ${matchupIndex+1} of ${games.length}</span><button onclick="selectMatchup(${matchupIndex+1})">Next ›</button></div>
@@ -1288,7 +1306,7 @@ function matchupView(){
     ${recorded?.status==='final'?'<div class="fa-match-meta muted small">Final</div>':''}
     ${forecast}
     ${cells}<p class="muted small" style="text-align:center">Swipe left/right for other matchups · Scroll down for players</p>
-  </section>${byeTeams.length?card('This week’s bye',byeTeams.map(x=>esc(x.team||x.id)).join(', ')):''}
+  </section>
   <section class="card"><h3>League standings · verified finals only</h3><div style="overflow-x:auto"><table style="width:100%;text-align:left"><thead><tr><th>Team</th><th>W</th><th>L</th><th>T</th><th>PF</th></tr></thead><tbody>${(state.standings||[]).map(r=>`<tr><td>${esc(m(r.manager)?.team||r.manager)}</td><td>${r.wins}</td><td>${r.losses}</td><td>${r.ties}</td><td>${fmt(r.pointsFor)}</td></tr>`).join('')}</tbody></table></div></section>`;
 }
 function chatComposerFocused(){
@@ -1468,7 +1486,13 @@ function postseasonData(){
  const w=Number(r.wins)||0,l=Number(r.losses)||0,t=Number(r.ties)||0,pf=Number(r.pointsFor)||0;
  return {id:x.id,name:x.team,w,l,t,pf,pct:w+l+t?(w+t/2)/(w+l+t):0};
  }).sort((a,b)=>b.pct-a.pct||b.pf-a.pf||String(a.id).localeCompare(String(b.id)));
- const n=rows.length,slots=n<=8?4:6,end=n<=8?14:13,remaining=new Map(rows.map(r=>[String(r.id),0]));
+ const n=rows.length;
+ const end=state.postseason?.regularSeasonEnd??(n===6
+  ?Object.keys(state.weeklyLedger?.[14]?.matchups||{}).some(id=>!id.startsWith('post-'))?14:13
+  :n<=8?14:13);
+ const sixTeam=n===6&&end===13;
+ const slots=state.postseason?.qualifiers??(sixTeam||n>8?6:4);
+ const remaining=new Map(rows.map(r=>[String(r.id),0]));
  let complete=Boolean(state.scheduleStartWeek)&&Number(state.scheduleStartWeek)<=end;
  for(let week=Number(state.scheduleStartWeek||1);week<=end;week++){
   const games=state.matchupSchedule?.[week];if(!Array.isArray(games)){complete=false;continue;}
@@ -1478,31 +1502,57 @@ function postseasonData(){
   }
  }
  const status=rows.map(r=>{
+  if(state.postseason?.locked){
+   const seed=state.postseason.seeds.indexOf(r.id);
+   if(seed>=0)return seed<slots?'Clinched':'Eliminated';
+  }
+  if(sixTeam)return 'Clinched';
   if(!complete||n<6)return 'In the hunt';
   const max=x=>x.w+(remaining.get(String(x.id))||0);
   if(rows.filter(o=>o.id!==r.id&&o.w>max(r)).length>=slots)return 'Eliminated';
   if(rows.filter(o=>o.id!==r.id&&max(o)>=r.w).length<slots)return 'Clinched';
   return 'In the hunt';
- });return {rows,n,slots,end,status};
+ });return {rows,n,slots,end,status,sixTeam};
 }
 function postseasonView(){
  if(state.postseason?.locked){
   const p=state.postseason,team=id=>esc(m(id)?.team||id||'TBD');
+  const sixTeam=p.format==='six-team-reseeded';
+  const byes=sixTeam&&p.championshipBye?card('Earned byes · Weeks 15–16',
+   '<div class="row"><span>Championship</span><b>'+team(p.championshipBye)+'</b></div>'+
+   '<div class="row"><span>Consolation</span><b>'+team(p.consolationBye)+'</b></div>'):'';
+  const placements=p.finalPlacements?card('Final placements',p.finalPlacements.map(row=>
+   '<div class="row"><span>'+row.place+'</span><b>'+team(row.manager)+'</b></div>').join('')):'';
   const stage=week=>{
    const fixtures=(state.matchupSchedule?.[week]||[]).filter(g=>g.kind&&g.kind!=='placement');
    return '<div style="min-width:180px;flex:1;border:1px solid #394960;border-radius:12px;padding:12px"><b>Week '+week+'</b>'+(
-    fixtures.length?fixtures.map(g=>'<div style="border:1px solid #4a607b;border-radius:8px;padding:10px;margin:8px 0">'+team(g.home)+'<div class="muted small">vs</div>'+team(g.away)+' <span class="muted small">('+esc(g.kind)+')</span></div>').join(''):'<p class="muted">Awaiting previous round</p>')+'</div>';
+    fixtures.length?fixtures.map(g=>'<div style="border:1px solid #4a607b;border-radius:8px;padding:10px;margin:8px 0">'+team(g.home)+'<div class="muted small">vs</div>'+team(g.away)+' <span class="muted small">('+esc(sixTeamFixtureLabels[g.kind]||g.kind)+')</span></div>').join(''):'<p class="muted">Awaiting previous round</p>')+'</div>';
   };
   return '<h1>Postseason · Official Bracket</h1><p>Seeds locked after Week '+p.regularSeasonEnd+'. Phase: <b>'+esc(p.phase)+'</b></p>'+
-   card('Official seeds',p.seeds.map((id,i)=>'<div class="row"><b>#'+(i+1)+' '+team(id)+'</b><span>'+(i<p.qualifiers?'Championship':'Consolation')+'</span></div>').join(''))+
+   card('Official seeds',p.seeds.map((id,i)=>'<div class="row"><b>#'+(i+1)+' '+team(id)+'</b><span>'+(sixTeam?'Qualified':i<p.qualifiers?'Championship':'Consolation')+'</span></div>').join(''))+
    card('Postseason schedule','<div style="display:flex;flex-wrap:wrap;gap:10px">'+[14,15,16,17,18].filter(w=>w>p.regularSeasonEnd).map(stage).join('')+'</div>')+
-   (p.championshipFinal?card('Final results','Champion: '+team(p.championshipFinal.champion)+' · Runner-up: '+team(p.championshipFinal.runnerUp)+' · Third: '+team(p.championshipFinal.third)):'')+
+   byes+(placements||(p.championshipFinal?card('Final results','Champion: '+team(p.championshipFinal.champion)+' · Runner-up: '+team(p.championshipFinal.runnerUp)+' · Third: '+team(p.championshipFinal.third)):''))+
    '<p class="muted small">Future rounds remain hidden until all preceding NFL games and fantasy scores are verified.</p>';
  }
  const d=postseasonData();if(d.n<6)return '<h1>Postseason</h1>'+card('Bracket projections','Six registered teams are required.');
  const seed=i=>d.rows[i]?'#'+(i+1)+' '+esc(d.rows[i].name):'TBD';
  const game=(a,b)=>'<div style="border:1px solid #4a607b;border-radius:9px;margin:10px 0;padding:12px"><b>'+a+'</b><div class="muted small">vs</div><b>'+b+'</b></div>';
  const stage=(title,body)=>'<div style="border:1px solid #394960;border-radius:12px;padding:12px;min-width:190px;flex:1"><b>'+title+'</b>'+body+'</div>';
+ if(d.sixTeam){
+  const bracket=(title,finish)=>card(title,
+   stage('Weeks 15–16 · Semifinal',game('Second-highest seed','Lowest seed')+
+    '<p class="muted small">The highest original seed earns a bye. '+finish[0]+'</p>')+
+   stage('Weeks 17–18 · Final',game('Highest original seed','Semifinal winner')+
+    '<p class="muted small">'+finish[1]+'</p>'));
+  return '<h1>Postseason · Projected Brackets</h1><p>All six teams qualify. Seeds lock after Week 13.</p>'+
+   card('Week 14 · Opening round',game(seed(0),seed(5))+game(seed(1),seed(4))+game(seed(2),seed(3))+
+    '<p>Winners advance to the championship bracket. Losers enter the consolation bracket.</p>')+
+   '<p>Semifinals and finals use two-week aggregate scoring.</p>'+
+   bracket('Championship bracket',['The semifinal loser finishes third.','The finalists play for first and second.'])+
+   bracket('Consolation bracket',['The semifinal loser finishes sixth.','The finalists play for fourth and fifth.'])+
+   card('Projected seeds',d.rows.map((r,i)=>'<div class="row"><span>'+seed(i)+'</span><span class="muted small">'+
+    r.w+'-'+r.l+'-'+r.t+' · '+fmt(r.pf)+' PF</span></div>').join(''));
+ }
  const wild=d.slots===6;
  const round=wild?stage('Week 14 · Wild Card',game(seed(2),seed(5))+game(seed(3),seed(4))+'<p class="muted small">#1 and #2 byes</p>'):'';
  const semi=wild?game(seed(0),'Lowest Wild Card winner')+game(seed(1),'Highest Wild Card winner'):game(seed(0),seed(3))+game(seed(1),seed(2));
@@ -1536,7 +1586,9 @@ function render(){if(!state||!manager)return;if(!document.getElementById('fa-nfl
     ${card('Draft status',`<p>${esc(draftData().status)}</p><button onclick="changeTab('Draft')">Open draft room</button>`)}</div>
     ${card('Recent activity',state.transactions.slice(0,8).map(t=>`<div class="row"><span>${esc(t.details)}</span></div>`).join('')||'<p>No activity yet.</p>')}<p class="muted small" style="text-align:center;opacity:.7">Fantasy Audible · ${esc(faCurrentBuild)}</p>`;
   if(tab==='My Team'){const picks=draftData().picks.filter(x=>x.manager===manager);
+    const bye=sixTeamBye(Number(state.week),manager);
     content=`<h1>${teamPhoto(manager,64)} ${esc(myTeam.team)}</h1><button onclick="renameTeam()">Rename My Team</button><div class="fa-photo-editor"><label for="teamPhotoUpload">Team profile photo</label><input id="teamPhotoUpload" type="file" accept="image/jpeg,image/png,image/webp" onchange="uploadTeamPhoto(this)"><button onclick="removeTeamPhoto()" ${myTeam.photo?'':'disabled'}>Remove photo</button><p class="muted small">Images are cropped to a square and resized automatically.</p></div>
+      ${bye?card('Postseason',esc(bye)):''}
       ${card('Drafted players',picks.map(x=>`<div class="row"><div><b>${nflPlayerName(nflPlayerByName(x.playerName)||{name:x.playerName})}</b>
       <div class="muted small">${esc(x.position)} · Pick ${x.overall}</div></div>
       <b>${x.projectedPoints==null?'—':fmt(x.projectedPoints)}</b></div>`).join('')||'<p>No draft picks yet.</p>')}

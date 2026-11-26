@@ -1,14 +1,22 @@
 'use strict';
 // Postseason state is independent of the regular-season standings ledger.
-const endWeek=n=>n<=8?14:13;
-const qualifiers=n=>n<=8?4:6;
+const SIX_TEAM_FORMAT='six-team-reseeded';
+const endWeek=n=>n!==6&&n<=8?14:13;
+const qualifiers=n=>n===6||n>8?6:4;
+const hasRecordedWeek=(s,week)=>Object.keys(s.weeklyLedger?.[week]?.matchups||{}).length>0;
+function regularSeasonEnd(s,n){
+ if(s.postseason?.locked)return s.postseason.regularSeasonEnd;
+ // Preserve the regular-season cutoff for legacy six-team leagues already playing Week 14.
+ if(n===6&&Object.keys(s.weeklyLedger?.[14]?.matchups||{}).some(id=>!id.startsWith('post-')))return 14;
+ return endWeek(n);
+}
 const pairs=(ids,week,kind)=>ids.reduce((a,_,i)=>{if(i%2===0&&ids[i+1])a.push({id:`post-${week}-${kind}-${i/2}`,home:ids[i],away:ids[i+1],kind});return a;},[]);
 function ranks(s,accounts){
  const ids=new Set(accounts.map(a=>a.manager));
  const rows=Object.fromEntries(s.managers.filter(m=>ids.has(m.id)).map(m=>[m.id,{id:m.id,w:0,l:0,t:0,pf:0,pa:0}]));
- const end=endWeek(Object.keys(rows).length);
+ const end=regularSeasonEnd(s,Object.keys(rows).length);
  for(let w=1;w<=end;w++)for(const x of Object.values(s.weeklyLedger?.[w]?.matchups||{})){
-  if(x.status!=='final'||!rows[x.home]||!rows[x.away])continue;
+  if(x.status!=='final'||x.id?.startsWith('post-')||!rows[x.home]||!rows[x.away])continue;
   const a=rows[x.home],b=rows[x.away];a.pf+=x.homeScore;b.pf+=x.awayScore;a.pa+=x.awayScore;b.pa+=x.homeScore;
   if(x.homeScore===x.awayScore){a.t++;b.t++;}else if(x.homeScore>x.awayScore){a.w++;b.l++;}else{a.l++;b.w++;}
  }
@@ -52,12 +60,87 @@ function install(s,p,week,fixtures){
  s.frozenMatchupSchedule[week]=addPlacement(s,p,week,fixtures);
  p.scheduledWeeks.push(week);return true;
 }
+function installSixTeamWeek(s,p,week,fixtures){
+ if(hasRecordedWeek(s,week))return false;
+ const existing=s.frozenMatchupSchedule[week]||[];
+ if(existing.length&&(week!==14||existing.some(f=>f.kind||f.id.startsWith('post-'))))return false;
+ s.frozenMatchupSchedule[week]=fixtures;
+ p.scheduledWeeks.push(week);
+ return true;
+}
+function startSixTeam(s,seeds){
+ const opening=pairs(seeds.slice(0,3).flatMap((id,i)=>[id,seeds[5-i]]),14,'opening');
+ const p={format:SIX_TEAM_FORMAT,locked:true,lockedAt:new Date().toISOString(),
+  regularSeasonEnd:13,seeds,qualifiers:6,phase:'opening',scheduledWeeks:[],
+  opening,championshipFinal:null,consolationChampion:null,finalPlacements:null};
+ if(!installSixTeamWeek(s,p,14,opening))return false;
+ s.postseason=p;
+ return true;
+}
+function nextLeg(fixture,week){
+ return {...fixture,id:fixture.id.replace(/^post-\d+-/,`post-${week}-`)};
+}
+function sixTeamScore(s,week,fixture){
+ const result=score(s,week,fixture.id);
+ return result?.home===fixture.home&&result.away===fixture.away&&
+  Number.isFinite(result.homeScore)&&Number.isFinite(result.awayScore)?result:null;
+}
+function advanceSixTeam(s,p,verified){
+ const seeds=p.seeds;
+ const completed=week=>weekFinal(s,week,verified(week));
+ if(p.phase==='opening'&&completed(14)){
+  const results=p.opening.map(f=>sixTeamScore(s,14,f));
+  if(results.some(x=>!x))return false;
+  const ordered=ids=>ids.sort((a,b)=>seeds.indexOf(a)-seeds.indexOf(b));
+  const championship=ordered(winners(results,seeds));
+  const consolation=ordered(losers(results,seeds));
+  const semis=[
+   ...pairs(championship.slice(1),15,'championship-semi'),
+   ...pairs(consolation.slice(1),15,'consolation-semi')
+  ];
+  if(!installSixTeamWeek(s,p,15,semis))return false;
+  Object.assign(p,{championshipBye:championship[0],consolationBye:consolation[0],semifinals:semis,phase:'semis'});
+  return true;
+ }
+ const semis=p.phase==='semis';
+ if(!semis&&p.phase!=='finals')return false;
+ const firstWeek=semis?15:17,secondWeek=firstWeek+1;
+ const fixtures=semis?p.semifinals:p.finals;
+ if(!p.scheduledWeeks.includes(secondWeek)){
+  return completed(firstWeek)&&installSixTeamWeek(s,p,secondWeek,fixtures.map(f=>nextLeg(f,secondWeek)));
+ }
+ if(!completed(secondWeek))return false;
+ const results=fixtures.map(f=>{
+  const first=sixTeamScore(s,firstWeek,f),second=sixTeamScore(s,secondWeek,nextLeg(f,secondWeek));
+  return first&&second?aggregateScore(f,first,second):null;
+ });
+ if(results.some(x=>!x))return false;
+ const [championshipWinner,consolationWinner]=winners(results,seeds);
+ const [championshipLoser,consolationLoser]=losers(results,seeds);
+ if(semis){
+  const finals=[
+   ...pairs([p.championshipBye,championshipWinner],17,'championship-final'),
+   ...pairs([p.consolationBye,consolationWinner],17,'consolation-final')
+  ];
+  if(!installSixTeamWeek(s,p,17,finals))return false;
+  Object.assign(p,{thirdPlace:championshipLoser,sixthPlace:consolationLoser,finals,phase:'finals'});
+ }else{
+  p.championshipFinal={champion:championshipWinner,runnerUp:championshipLoser,third:p.thirdPlace};
+  p.consolationChampion=consolationWinner;
+  p.finalPlacements=[championshipWinner,championshipLoser,p.thirdPlace,
+   consolationWinner,consolationLoser,p.sixthPlace].map((manager,i)=>({place:i+1,manager}));
+  p.phase='complete';
+  p.completedAt=new Date().toISOString();
+ }
+ return true;
+}
 function start(s,accounts,verified){
  if(s.postseason?.locked)return false;
  const seed=ranks(s,accounts),n=seed.length;if(n<6||n>12)return false;
- const end=endWeek(n);
+ const end=regularSeasonEnd(s,n);
  if(!weekFinal(s,end,verified(end)))return false;
- const q=qualifiers(n);
+ if(n===6&&end===13)return startSixTeam(s,seed);
+ const q=n===6?4:qualifiers(n);
  const p={locked:true,lockedAt:new Date().toISOString(),regularSeasonEnd:end,seeds:seed,qualifiers:q,phase:'opening',scheduledWeeks:[],consolationActive:seed.slice(q),consolationEliminated:[],championshipFinal:null,consolationChampion:null};
  s.postseason=p;
  // Existing deployments may have a legacy Week 14 regular-season fixture.
@@ -77,6 +160,7 @@ function start(s,accounts,verified){
 }
 function advance(s,accounts,verified){
  const p=s.postseason;if(!p?.locked)return false;
+ if(p.format===SIX_TEAM_FORMAT)return advanceSixTeam(s,p,verified);
  const seed=p.seeds;
  const completed=w=>weekFinal(s,w,verified(w));
  const results=(week,kind)=> (s.frozenMatchupSchedule?.[week]||[]).filter(m=>m.kind===kind).map(m=>score(s,week,m.id));
@@ -129,4 +213,4 @@ function advance(s,accounts,verified){
  }
  return false;
 }
-module.exports={endWeek,qualifiers,ranks,weekFinal,start,advance,winner,aggregateScore};
+module.exports={SIX_TEAM_FORMAT,endWeek,regularSeasonEnd,qualifiers,ranks,weekFinal,start,advance,winner,aggregateScore};
