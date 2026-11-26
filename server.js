@@ -503,9 +503,55 @@ function editorialEdition(s,kind,week){
     const biggest=sorted[0];if(biggest)lines.unshift(`Biggest margin: ${editorialTeam(s,biggest.winner||biggest.home)} in a ${Math.abs(biggest.homeScore-biggest.awayScore).toFixed(1)}-point decision.`);
     if(finals.length<fixtures.length)lines.push('Some matchups are still awaiting verified final scoring; this edition covers confirmed results only.');
   }else if(kind==='rankings'){
-    const standings=leagueStandings(s,[]).filter(x=>s.managers.some(m=>m.id===x.manager));
-    if(!standings.length||!Object.values(s.weeklyLedger||{}).some(w=>Object.values(w.matchups||{}).some(m=>m.status==='final')))return null;
-    standings.forEach((r,i)=>lines.push(`#${i+1} ${editorialTeam(s,r.manager)} — ${r.wins}-${r.losses}${r.ties?`-${r.ties}`:''}, ${r.pointsFor.toFixed(1)} points for. ${i===0?'Top of the mountain. Everybody else has homework.':i===standings.length-1?'The comeback tour better start soon.':'The standings do not negotiate.'}`));
+    const mean=v=>v.reduce((a,b)=>a+b,0)/Math.max(1,v.length);
+    const calculate=(cutoff,projections)=>{
+      const rows=s.managers.map(m=>({id:m.id,name:m.team,games:[],wins:0,ties:0,losses:0}));
+      const byId=new Map(rows.map(r=>[r.id,r]));
+      for(const [w,l] of Object.entries(s.weeklyLedger||{}).sort((a,b)=>Number(a[0])-Number(b[0]))){
+        if(Number(w)>=cutoff)continue;
+        for(const g of Object.values(l.matchups||{})){
+          if(g.status!=='final'||!Number.isFinite(g.homeScore)||!Number.isFinite(g.awayScore))continue;
+          for(const [id,p,o] of [[g.home,g.homeScore,g.awayScore],[g.away,g.awayScore,g.homeScore]]){
+            const r=byId.get(id);if(!r)continue;r.games.push({p,o});r[p>o?'wins':p<o?'losses':'ties']++;
+          }
+        }
+      }
+      for(const r of rows){
+        const scores=r.games.map(g=>g.p);r.avg=mean(scores);r.total=scores.reduce((a,b)=>a+b,0);r.recent=mean(scores.slice(-3));r.rate=(r.wins+.5*r.ties)/Math.max(1,scores.length);
+        r.consistency=scores.length>=2?1/(1+Math.sqrt(mean(scores.map(p=>(p-r.avg)**2)))/Math.max(1,r.avg)):null;
+        const starters=(s.players||[]).filter(p=>p.owner===r.id&&!['BENCH','IR'].includes(p.slot)&&p.slot);
+        r.proj=projections&&starters.length&&starters.every(p=>p.weeklyProjectedPoints!=null&&Number.isFinite(Number(p.weeklyProjectedPoints)))?starters.reduce((n,p)=>n+Number(p.weeklyProjectedPoints),0):null;
+      }
+      const active=rows.filter(r=>r.games.length);
+      const metrics=[['avg',30],['recent',25],['rate',20],['proj',15],['consistency',10]].filter(([k])=>active.every(r=>r[k]!=null));
+      for(const r of active){r.power=metrics.reduce((n,[k,w])=>{const vals=active.map(t=>t[k]),lo=Math.min(...vals),hi=Math.max(...vals);return n+w*(hi===lo?.5:(r[k]-lo)/(hi-lo));},0)/Math.max(1,metrics.reduce((n,m)=>n+m[1],0));}
+      return active.sort((a,b)=>b.power-a.power||b.avg-a.avg||String(a.id).localeCompare(String(b.id)));
+    };
+    const ranked=calculate(week,week===editorialWeek(s));if(!ranked.length)return null;
+    const prior=(s.editorial||[]).find(e=>e.kind==='rankings'&&e.week===week-1&&Array.isArray(e.rankedIds))?.rankedIds;
+    const avg=mean(ranked.map(r=>r.avg)),used=new Set();
+    const recentText=(s.editorial||[]).filter(e=>e.kind==='rankings'&&e.week<week&&e.week>=week-4).flatMap(e=>e.lines||[]).join(' ');
+    for(const [i,r] of ranked.entries()){
+      const last=r.games.at(-1),prev=r.games.at(-2),facts=[];
+      const add=(condition,stat,phrases)=>{if(condition)facts.push({stat,phrases});};
+      add(r.losses===0&&r.wins>0,'Unbeaten through '+r.games.length+' games.', ['The rest of the league is running out of excuses.','The unbeaten tour rolls on.','Nobody has found the answer yet.']);
+      add(r.avg>avg&&r.rate<.5,'Above-average scoring despite a losing record.', ['The scoreboard is more intimidating than the record.','The offense deserves better than its results.','Do not confuse bad results with a bad roster.']);
+      add(r.avg<avg&&r.rate>.5,'Below-average scoring despite a winning record.', ['Winning ugly still counts.','The record is doing the heavy lifting.','That margin for error is getting uncomfortable.']);
+      add(r.avg===Math.max(...ranked.map(t=>t.avg)),'League-leading '+r.avg.toFixed(1)+' PPG.', ['Everybody else is chasing the benchmark.','This offense sets the standard.','The league has a scoring problem and this team is the cause.']);
+      add(r.avg===Math.min(...ranked.map(t=>t.avg)),'League-low '+r.avg.toFixed(1)+' PPG.', ['The offense needs answers, not excuses.','The front office has homework.','A turnaround starts with finding points.']);
+      add(last.p-last.o>=30,'Won its latest game by '+(last.p-last.o).toFixed(1)+'.',['That was a demolition.','The opponent had no answer.','A statement win if ever there was one.']);
+      add(last.o-last.p>=30,'Lost its latest game by '+(last.o-last.p).toFixed(1)+'.',['Reconstruction efforts are underway.','The film session will not be pleasant.','That is a result to forget.']);
+      add(Math.abs(last.p-last.o)<5,'Latest margin: '+Math.abs(last.p-last.o).toFixed(1)+' points.',['That one needed a seatbelt.','Every lineup decision mattered.','Fantasy football is a cruel business.']);
+      add(prev&&last.p>prev.p,'Scoring rose '+(last.p-(prev?.p||0)).toFixed(1)+' points last game.',['The offense is finding its rhythm.','Signs of life are appearing.','Momentum is worth watching.']);
+      add(prev&&last.p<prev.p,'Scoring fell '+((prev?.p||0)-last.p).toFixed(1)+' points last game.',['The offense hit a speed bump.','The next outing needs a response.','The trend deserves attention.']);
+      add(r.proj!=null,'Current lineup projects '+(r.proj||0).toFixed(1)+' points.',['The next test is on the schedule.','Paper points still need to become real ones.','The roster has its next assignment.']);
+      add(true,'Latest score: '+last.p.toFixed(1)+' against '+last.o.toFixed(1)+'.',['The next scoreboard will tell us more.','Results are the ultimate receipts.','The season is still writing its story.','The next matchup offers another test.','There is work left to do.','The numbers speak louder than the press conference.']);
+      let chosen;for(const f of facts){const phrase=f.phrases.find(p=>!used.has(p)&&!recentText.includes(p));if(phrase){chosen=f.stat+' '+phrase;used.add(phrase);break;}}
+      if(!chosen)chosen=facts[0].stat;
+      const old=prior?.indexOf(r.id),movement=old>=0?(old===i?' —':old>i?' ↑'+(old-i):' ↓'+(i-old)):'';
+      lines.push('#'+(i+1)+movement+' '+r.name+' — '+r.wins+'-'+r.losses+(r.ties?'-'+r.ties:'')+', '+r.total.toFixed(1)+' points for. '+chosen);
+    }
+    return {id:'rankings-'+week,kind,week,title,lines,rankedIds:ranked.map(r=>r.id),commentaryVersion:5,publishedAt:new Date().toISOString()};
   }else if(kind==='preview'){
     if(!fixtures.length)return null;
     const table=leagueStandings(s,[]), ranks=new Map(table.map((r,i)=>[r.manager,{...r,rank:i+1}]));
@@ -636,7 +682,7 @@ async function publishEditorial(){
     // Upgrade already-published bland previews in place, preserving their IDs.
     // Existing Locker Room announcements are intentionally not duplicated.
     const stalePreview=(preview.editorial||[]).some(e=>
-      (e.kind==='preview'&&!(e.commentaryVersion>=3))||(e.kind==='outlook'&&!(e.commentaryVersion>=4)));
+      (e.kind==='rankings'&&e.week===current&&!(e.commentaryVersion>=5))||(e.kind==='preview'&&!(e.commentaryVersion>=3))||(e.kind==='outlook'&&!(e.commentaryVersion>=4)));
 
     const readyRecaps=candidateWeeks.filter(week=>{
       const fixtures=preview.frozenMatchupSchedule?.[week]||[];
@@ -649,9 +695,9 @@ async function publishEditorial(){
       s.editorial ||= [];
       for(let i=0;i<s.editorial.length;i++){
         const old=s.editorial[i];
-        if(!['preview','outlook'].includes(old.kind)||old.commentaryVersion>=(old.kind==='outlook'?4:3))continue;
+        if(old.kind==='rankings'){if(old.week!==editorialWeek(s)||old.commentaryVersion>=5)continue;}else if(!['preview','outlook'].includes(old.kind)||old.commentaryVersion>=(old.kind==='outlook'?4:3))continue;
         const revised=editorialEdition(s,old.kind,old.week);
-        if(revised)s.editorial[i]={...revised,commentaryVersion:old.kind==='outlook'?4:3,publishedAt:old.publishedAt,updatedAt:new Date().toISOString()};
+        if(revised)s.editorial[i]={...revised,commentaryVersion:old.kind==='rankings'?5:old.kind==='outlook'?4:3,publishedAt:old.publishedAt,updatedAt:new Date().toISOString()};
       }
       const nowWeek=editorialWeek(s);
       for(const week of [nowWeek,Math.max(1,nowWeek-1)]){
