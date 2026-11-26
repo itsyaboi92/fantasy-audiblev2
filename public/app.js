@@ -814,6 +814,25 @@ function playerGameLocked(player){
   if(player.kickoffAt&&Number.isFinite(Date.parse(player.kickoffAt))&&Date.parse(player.kickoffAt)<=Date.now())return true;
   return typeof player.kickoff==='number'&&player.kickoff!==99&&player.kickoff<=state.phase;
 }
+function rosterActualScore(player,week){
+  for(const match of Object.values(state.weeklyLedger?.[week]?.matchups||{})){
+    if(match.status!=='final')continue;
+    const lineup=match.home===player.owner?match.homeLineup:match.away===player.owner?match.awayLineup:null;
+    const entry=lineup?.find(p=>p.id===player.id);
+    if(Number.isFinite(entry?.points))return {points:entry.points,status:'Final',credited:entry.scoringMode==='handcuff'};
+  }
+
+  const gameStatus=player.nflGame?.status;
+  if(Number(player.scoreWeek)!==week||!['playing','final'].includes(gameStatus))return null;
+  const credited=player.scoringMode==='handcuff';
+  const updated=player.liveScoreStatus==='UPDATED';
+  const hasScore=updated||player.liveScoreStatus==='PARTIAL'||player.liveScoreUpdatedAt||credited;
+  const points=credited?player.credited:score(player);
+  if(!hasScore||!Number.isFinite(points))return null;
+
+  const status=updated&&!credited?(gameStatus==='final'?'Final':'Live'):'Provisional';
+  return {points,status,credited};
+}
 function rosterMatchupDetails(p){
   const season=Number(state?.nflDirectorySync?.season||new Date().getFullYear());
   const week=Math.min(18,Math.max(1,Number(state?.week||state?.nflDirectorySync?.currentWeek||1)));
@@ -831,10 +850,10 @@ function rosterMatchupDetails(p){
   const rankLabel=Number.isInteger(rank)&&rank>=1&&rank<=32?rank+' / 32':'—';
   // Lower OPRK is tougher; high OPRK is a more favorable matchup.
   const strength=Number.isInteger(rank)&&rank>=1&&rank<=32?(rank<=10?'Difficult':rank>=23?'Easy':'Average'):'Unrated';
-  const live=weeklyDirectory[espnId]?.gameStatus==='playing'?Number(weeklyDirectory[espnId].points):null;
+  const actual=rosterActualScore(p,week);
   return `<div class="muted small">Next: ${esc(opponent)}${kickoff?' · '+esc(kickoff):''} · Wk ${week}</div>
     <div class="muted small">Projected PPR: ${game?.status==='final'?'—':Number.isFinite(projection)&&projection>=0?fmt(projection)+' est.':'—'} · OPRK: ${rankLabel} · ${strength}</div>
-    ${live!==null&&Number.isFinite(live)?`<div class="muted small">Live: ${fmt(live)} pts</div>`:''}`;
+    <div class="small"><b>Actual: ${actual?fmt(actual.points)+' pts':'—'}</b>${actual?` <span class="muted">· ${actual.status}${actual.credited?' · Credited':''}</span>`:''}</div>`;
 }
 function lineupChoiceLabel(p){
   const season=Number(state?.nflDirectorySync?.season||new Date().getFullYear());
